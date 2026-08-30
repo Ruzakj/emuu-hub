@@ -15,7 +15,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ROM = 1001
         private const val STATUS_VIEW_ID = 1002
-        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes")
+        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes", "sfc", "smc")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +32,7 @@ class MainActivity : Activity() {
         })
         root.addView(TextView(this).apply {
             id = STATUS_VIEW_ID
-            text = "Offline emulator\nmGBA: GB / GBC / GBA\nFCEUmm: NES"
+            text = "Offline emulator\nmGBA: GB / GBC / GBA\nFCEUmm: NES\nSnes9x: SNES"
             textSize = 16f
             gravity = Gravity.CENTER
             setPadding(0, 32, 0, 32)
@@ -73,13 +73,15 @@ class MainActivity : Activity() {
             "application/x-gba-rom", "application/x-gameboy-advance-rom" -> "gba"
             "application/x-gameboy-rom" -> "gb"
             "application/x-gameboy-color-rom" -> "gbc"
-            "application/x-nes-rom", "application/vnd.nintendo.snes.rom" -> "nes"
+            "application/x-nes-rom" -> "nes"
+            "application/vnd.nintendo.snes.rom", "application/x-snes-rom", "application/x-super-nintendo-rom" -> "sfc"
             else -> ""
         }
     }
 
     private fun coreIdFor(ext: String): String = when (ext) {
         "nes" -> "fceumm"
+        "sfc", "smc" -> "snes9x"
         else -> "mgba"
     }
 
@@ -94,7 +96,7 @@ class MainActivity : Activity() {
 
         if (ext !in SUPPORTED) {
             findViewById<TextView>(STATUS_VIEW_ID).text =
-                "Format belum didukung: $name\nSaat ini: .gb / .gbc / .gba / .nes\nJika file masih .zip/.7z, ekstrak dulu ROM-nya."
+                "Format belum didukung: $name\nSaat ini: .gb / .gbc / .gba / .nes / .sfc / .smc\nJika file masih .zip/.7z, ekstrak dulu ROM-nya."
             return
         }
 
