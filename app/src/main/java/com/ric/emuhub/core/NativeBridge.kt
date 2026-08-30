@@ -15,6 +15,7 @@ object NativeBridge {
     external fun loadState(path: String): Boolean
     external fun setButton(id: Int, pressed: Boolean)
     external fun setAnalog(x: Int, y: Int)
+    external fun decodeEcm(inputPath: String, outputPath: String): Boolean
     external fun reset()
     external fun unload()
 }
