@@ -141,6 +141,7 @@ template<typename T>static void opt(T&out,const char*n){ out=reinterpret_cast<T>
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init(JNIEnv*e,jobject,jstring c,jstring s,jstring v){
     const char*cp=e->GetStringUTFChars(c,nullptr),*sp=e->GetStringUTFChars(s,nullptr),*sv=e->GetStringUTFChars(v,nullptr);
+    const bool wantsAnalog = std::strstr(cp,"pcsx") != nullptr || std::strstr(cp,"ppsspp") != nullptr;
     systemDir=sp; saveDir=sv; core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);
     e->ReleaseStringUTFChars(c,cp); e->ReleaseStringUTFChars(s,sp); e->ReleaseStringUTFChars(v,sv);
     if(!core){LOGE("dlopen: %s",dlerror());return JNI_FALSE;}
@@ -155,7 +156,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init
     p_retro_set_environment(envCb); p_retro_set_video_refresh(videoCb); p_retro_set_audio_sample(audioCb);
     p_retro_set_audio_sample_batch(audioBatchCb); p_retro_set_input_poll(inputPollCb); p_retro_set_input_state(inputStateCb);
     p_retro_init();
-    if(p_retro_set_controller_port_device) p_retro_set_controller_port_device(0,RETRO_DEVICE_JOYPAD);
+    if(p_retro_set_controller_port_device) p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
+    LOGI("Controller mode: %s",wantsAnalog?"analog":"joypad");
     return JNI_TRUE;
 }
 
@@ -163,7 +165,6 @@ extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setContr
     if(p_retro_set_controller_port_device){
         unsigned d=(device==RETRO_DEVICE_ANALOG)?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD;
         p_retro_set_controller_port_device(0,d);
-        LOGI("Controller port 0 device=%u",d);
     }
 }
 
