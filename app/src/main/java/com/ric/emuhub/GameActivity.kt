@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -12,6 +13,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -19,40 +21,320 @@ import com.ric.emuhub.core.NativeBridge
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class GameActivity : Activity() {
     private var gameView: GameView? = null
     @Volatile private var fastForward = false
     private lateinit var stateFile: File
-    private var analogX = 0; private var analogY = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val rom=intent.getStringExtra("romPath")?:run{finish();return}; val coreId=intent.getStringExtra("coreId")?:"mgba"; val romName=intent.getStringExtra("romName")?:File(rom).name
-        val coreFile=when(coreId){"fceumm"->"libfceumm_core.so";"snes9x"->"libsnes9x_core.so";"pcsx"->"libpcsx_rearmed_core.so";"ppsspp"->"libppsspp_core.so";else->"libmgba_core.so"}
-        val coreLabel=when(coreId){"fceumm"->"FCEUmm";"snes9x"->"Snes9x";"pcsx"->"PCSX-ReARMed";"ppsspp"->"PPSSPP";else->"mGBA"}
-        val systemRoot=File(filesDir,"system").apply{mkdirs()}; if(coreId=="ppsspp")installPpssppAssets(systemRoot)
-        val saveDirFile=File(filesDir,"saves").apply{mkdirs()}; stateFile=File(saveDirFile,"${coreId}_${safeStateKey(romName)}_slot0.state")
-        if(!NativeBridge.init(applicationInfo.nativeLibraryDir+"/$coreFile",systemRoot.absolutePath,saveDirFile.absolutePath)||!NativeBridge.loadGame(rom)){setContentView(TextView(this).apply{text="$coreLabel core gagal memuat game.";gravity=Gravity.CENTER;textSize=18f});return}
-        val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xFF09090B.toInt())}
-        gameView=GameView().also{root.addView(it,LinearLayout.LayoutParams(-1,0,1f))};root.addView(buildUtilityControls(),LinearLayout.LayoutParams(-1,-2));if(coreId=="pcsx"||coreId=="ppsspp")root.addView(buildAnalogControls(),LinearLayout.LayoutParams(-1,-2));root.addView(buildControls(coreId),LinearLayout.LayoutParams(-1,-2));setContentView(root);gameView?.start()
-    }
-    private fun installPpssppAssets(root:File){val t=File(root,"PPSSPP"),m=File(t,".emuhub_assets_v1");if(m.exists())return;t.mkdirs();copyAssetTree("PPSSPP",t);runCatching{m.writeText("1")}}
-    private fun copyAssetTree(p:String,t:File){val e=assets.list(p)?:return;if(e.isEmpty()){t.parentFile?.mkdirs();assets.open(p).use{i->t.outputStream().use{i.copyTo(it)}};return};t.mkdirs();e.forEach{copyAssetTree("$p/$it",File(t,it))}}
-    private fun safeStateKey(n:String)=MessageDigest.getInstance("SHA-256").digest(n.toByteArray()).take(8).joinToString(""){"%02x".format(it)}
-    private fun buildUtilityControls():View{val r=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};fun add(s:String,f:()->Unit){r.addView(Button(this).apply{text=s;setOnClickListener{f()}},LinearLayout.LayoutParams(0,-2,1f))};add("SAVE"){Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show()};add("LOAD"){Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show()};r.addView(Button(this).apply{text="FAST 2×";setOnClickListener{fastForward=!fastForward;text=if(fastForward)"FAST ON" else "FAST 2×";gameView?.onFastForwardChanged(fastForward)}},LinearLayout.LayoutParams(0,-2,1f));add("RESET"){NativeBridge.reset()};return r}
-    private fun buildAnalogControls():View{val r=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};listOf("A←" to Pair(-32767,0),"A↑" to Pair(0,-32767),"A↓" to Pair(0,32767),"A→" to Pair(32767,0)).forEach{(l,a)->r.addView(Button(this).apply{text=l;setOnTouchListener{_,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->{if(a.first!=0)analogX=a.first;if(a.second!=0)analogY=a.second};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(a.first!=0)analogX=0;if(a.second!=0)analogY=0}};NativeBridge.setAnalog(analogX,analogY);true}},LinearLayout.LayoutParams(0,-2,1f))};return r}
-    private fun buildControls(c:String):View{val r=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};val x=mutableListOf("←" to 6,"↑" to 4,"↓" to 5,"→" to 7,"L" to 10,"SELECT" to 2,"START" to 3,"R" to 11,"B" to 0,"A" to 8);if(c in setOf("snes9x","pcsx","ppsspp")){x.add("Y" to 1);x.add("X" to 9)};if(c=="pcsx"){x.add("L2" to 12);x.add("R2" to 13)};x.forEach{(l,id)->r.addView(Button(this).apply{text=l;minWidth=0;setOnTouchListener{_,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->NativeBridge.setButton(id,true);MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->NativeBridge.setButton(id,false)};true}},LinearLayout.LayoutParams(0,-2,if(l.length>2)1.5f else 1f))};return r}
-    override fun onDestroy(){gameView?.stop();NativeBridge.setAnalog(0,0);NativeBridge.unload();super.onDestroy()}
 
-    inner class GameView:View(this@GameActivity),Runnable{
-        private val running=AtomicBoolean(false); private var frameW=NativeBridge.getWidth().coerceAtLeast(1);private var frameH=NativeBridge.getHeight().coerceAtLeast(1)
-        /* PS1 changes between 256/320/368/512/640 widths during boot/gameplay. Allocate for the
-           largest software frame instead of freezing the initial geometry. */
-        private val pixels=IntArray(2048*2048); @Volatile private var bitmap=Bitmap.createBitmap(frameW,frameH,Bitmap.Config.ARGB_8888);private val paint=Paint(Paint.FILTER_BITMAP_FLAG);private var thread:Thread?=null;private val audioScratch=ShortArray(8192);private var audioTrack:AudioTrack?=null
-        fun start(){val rate=NativeBridge.getSampleRate().coerceAtLeast(8000);val min=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096);audioTrack=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()).setBufferSizeInBytes(maxOf(min*2,rate*4/12)).setTransferMode(AudioTrack.MODE_STREAM).setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY).build().also{it.play()};if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame").also{it.start()}}
-        fun onFastForwardChanged(e:Boolean){try{audioTrack?.pause();audioTrack?.flush();if(!e)audioTrack?.play()}catch(_:Exception){}}
-        fun stop(){running.set(false);thread?.interrupt();try{thread?.join(500)}catch(_:Exception){};try{audioTrack?.pause();audioTrack?.flush();audioTrack?.stop()}catch(_:Exception){};audioTrack?.release();audioTrack=null}
-        override fun run(){while(running.get()){val n=NativeBridge.runFrame(pixels);if(n>0){val w=NativeBridge.getWidth().coerceIn(1,2048);val h=NativeBridge.getHeight().coerceIn(1,2048);if(w*h<=pixels.size){if(w!=frameW||h!=frameH){frameW=w;frameH=h;bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)};bitmap.setPixels(pixels,0,w,0,0,w,h);postInvalidate()}};if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};try{Thread.sleep(8)}catch(_:Exception){break}}else{var c=NativeBridge.readAudio(audioScratch);while(c>0&&running.get()){var o=0;while(o<c&&running.get()){val z=audioTrack?.write(audioScratch,o,c-o,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)o+=z else break};c=NativeBridge.readAudio(audioScratch)}}}}
-        override fun onDraw(c:Canvas){super.onDraw(c);val b=bitmap;val w=frameW.coerceAtLeast(1);val h=frameH.coerceAtLeast(1);val s=minOf(width.toFloat()/w,height.toFloat()/h);val dw=w*s;val dh=h*s;c.drawBitmap(b,null,android.graphics.RectF((width-dw)/2f,(height-dh)/2f,(width+dw)/2f,(height+dh)/2f),paint)}
+        val rom = intent.getStringExtra("romPath") ?: run { finish(); return }
+        val coreId = intent.getStringExtra("coreId") ?: "mgba"
+        val romName = intent.getStringExtra("romName") ?: File(rom).name
+        val coreFile = when (coreId) {
+            "fceumm" -> "libfceumm_core.so"
+            "snes9x" -> "libsnes9x_core.so"
+            "pcsx" -> "libpcsx_rearmed_core.so"
+            "ppsspp" -> "libppsspp_core.so"
+            else -> "libmgba_core.so"
+        }
+        val coreLabel = when (coreId) {
+            "fceumm" -> "FCEUmm"
+            "snes9x" -> "Snes9x"
+            "pcsx" -> "PCSX-ReARMed"
+            "ppsspp" -> "PPSSPP"
+            else -> "mGBA"
+        }
+
+        val systemRoot = File(filesDir, "system").apply { mkdirs() }
+        if (coreId == "ppsspp") installPpssppAssets(systemRoot)
+        val saveDir = File(filesDir, "saves").apply { mkdirs() }
+        stateFile = File(saveDir, "${coreId}_${safeStateKey(romName)}_slot0.state")
+
+        if (!NativeBridge.init(applicationInfo.nativeLibraryDir + "/$coreFile", systemRoot.absolutePath, saveDir.absolutePath) ||
+            !NativeBridge.loadGame(rom)
+        ) {
+            setContentView(TextView(this).apply {
+                text = "$coreLabel core gagal memuat game."
+                gravity = Gravity.CENTER
+                textSize = 18f
+            })
+            return
+        }
+
+        val root = FrameLayout(this).apply { setBackgroundColor(0xFF050507.toInt()) }
+        gameView = GameView().also {
+            root.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        root.addView(buildGamepadOverlay(coreId), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        setContentView(root)
+        gameView?.start()
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun translucentBackground(alpha: Int = 120, stroke: Boolean = true, radiusDp: Int = 18): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radiusDp).toFloat()
+            setColor((alpha shl 24) or 0x00202024)
+            if (stroke) setStroke(dp(1), 0x55FFFFFF)
+        }
+
+    private fun roundBackground(alpha: Int = 105): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor((alpha shl 24) or 0x00202024)
+        setStroke(dp(1), 0x55FFFFFF)
+    }
+
+    private fun gameButton(label: String, id: Int, sizeDp: Int = 58): Button = Button(this).apply {
+        text = label
+        textSize = if (label.length > 2) 11f else 17f
+        minWidth = 0
+        minHeight = 0
+        minimumWidth = 0
+        minimumHeight = 0
+        includeFontPadding = false
+        setPadding(0, 0, 0, 0)
+        background = roundBackground()
+        alpha = 0.82f
+        setTextColor(0xFFFFFFFF.toInt())
+        layoutParams = FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { NativeBridge.setButton(id, true); v.alpha = 1f }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { NativeBridge.setButton(id, false); v.alpha = 0.82f }
+            }
+            true
+        }
+    }
+
+    private fun smallOverlayButton(label: String, onClick: (Button) -> Unit): Button = Button(this).apply {
+        text = label
+        textSize = 10f
+        minWidth = 0; minHeight = 0; minimumWidth = 0; minimumHeight = 0
+        setPadding(dp(8), 0, dp(8), 0)
+        setTextColor(0xFFFFFFFF.toInt())
+        background = translucentBackground(105, radiusDp = 12)
+        alpha = 0.78f
+        setOnClickListener { onClick(this) }
+    }
+
+    private fun buildGamepadOverlay(coreId: String): View {
+        val overlay = FrameLayout(this)
+
+        // Small utility bar floats at the top and no longer consumes game height.
+        val tools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        listOf("SAVE", "LOAD", "FAST", "RESET").forEach { label ->
+            val b = smallOverlayButton(label) { button ->
+                when (label) {
+                    "SAVE" -> Toast.makeText(this, if (NativeBridge.saveState(stateFile.absolutePath)) "State tersimpan" else "Save gagal", Toast.LENGTH_SHORT).show()
+                    "LOAD" -> Toast.makeText(this, if (stateFile.exists() && NativeBridge.loadState(stateFile.absolutePath)) "State dimuat" else "Load gagal", Toast.LENGTH_SHORT).show()
+                    "FAST" -> {
+                        fastForward = !fastForward
+                        button.text = if (fastForward) "FAST ON" else "FAST"
+                        gameView?.onFastForwardChanged(fastForward)
+                    }
+                    "RESET" -> NativeBridge.reset()
+                }
+            }
+            tools.addView(b, LinearLayout.LayoutParams(dp(62), dp(34)).apply { marginEnd = dp(5) })
+        }
+        overlay.addView(tools, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(38), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
+
+        // Shoulder buttons stay near the real gamepad shoulder positions.
+        overlay.addView(gameButton("L", 10, 64), FrameLayout.LayoutParams(dp(64), dp(42), Gravity.TOP or Gravity.START).apply { leftMargin = dp(22); topMargin = dp(14) })
+        overlay.addView(gameButton("R", 11, 64), FrameLayout.LayoutParams(dp(64), dp(42), Gravity.TOP or Gravity.END).apply { rightMargin = dp(22); topMargin = dp(14) })
+        if (coreId == "pcsx") {
+            overlay.addView(gameButton("L2", 12, 52), FrameLayout.LayoutParams(dp(52), dp(38), Gravity.TOP or Gravity.START).apply { leftMargin = dp(96); topMargin = dp(16) })
+            overlay.addView(gameButton("R2", 13, 52), FrameLayout.LayoutParams(dp(52), dp(38), Gravity.TOP or Gravity.END).apply { rightMargin = dp(96); topMargin = dp(16) })
+        }
+
+        // Real continuous analog stick for PS1/PSP. D-pad remains slightly above it.
+        if (coreId == "pcsx" || coreId == "ppsspp") {
+            val stick = AnalogStickView()
+            overlay.addView(stick, FrameLayout.LayoutParams(dp(150), dp(150), Gravity.BOTTOM or Gravity.START).apply {
+                leftMargin = dp(30); bottomMargin = dp(20)
+            })
+        }
+
+        val dpad = DPadView()
+        overlay.addView(dpad, FrameLayout.LayoutParams(dp(138), dp(138), Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = if (coreId == "pcsx" || coreId == "ppsspp") dp(188) else dp(42)
+            bottomMargin = dp(26)
+        })
+
+        val face = FrameLayout(this)
+        val faceSize = 178
+        fun addFace(label: String, id: Int, gravity: Int, x: Int, y: Int) {
+            face.addView(gameButton(label, id, 58), FrameLayout.LayoutParams(dp(58), dp(58), gravity).apply {
+                leftMargin = dp(x); topMargin = dp(y)
+            })
+        }
+        when (coreId) {
+            "pcsx", "ppsspp" -> {
+                addFace("△", 9, Gravity.TOP or Gravity.START, 60, 0)
+                addFace("○", 8, Gravity.TOP or Gravity.START, 120, 60)
+                addFace("×", 0, Gravity.TOP or Gravity.START, 60, 120)
+                addFace("□", 1, Gravity.TOP or Gravity.START, 0, 60)
+            }
+            "snes9x" -> {
+                addFace("X", 9, Gravity.TOP or Gravity.START, 60, 0)
+                addFace("A", 8, Gravity.TOP or Gravity.START, 120, 60)
+                addFace("B", 0, Gravity.TOP or Gravity.START, 60, 120)
+                addFace("Y", 1, Gravity.TOP or Gravity.START, 0, 60)
+            }
+            else -> {
+                addFace("A", 8, Gravity.TOP or Gravity.START, 105, 45)
+                addFace("B", 0, Gravity.TOP or Gravity.START, 35, 90)
+            }
+        }
+        overlay.addView(face, FrameLayout.LayoutParams(dp(faceSize), dp(faceSize), Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = dp(28); bottomMargin = dp(18)
+        })
+
+        val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        center.addView(gameButton("SELECT", 2, 64), LinearLayout.LayoutParams(dp(72), dp(38)).apply { marginEnd = dp(10) })
+        center.addView(gameButton("START", 3, 64), LinearLayout.LayoutParams(dp(72), dp(38)))
+        overlay.addView(center, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(44), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(20) })
+
+        return overlay
+    }
+
+    inner class AnalogStickView : View(this@GameActivity) {
+        private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x552A2A30 }
+        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FFFFFF; style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
+        private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xAA5A5A62.toInt() }
+        private var knobX = 0f; private var knobY = 0f
+
+        override fun onDraw(canvas: Canvas) {
+            val cx = width / 2f; val cy = height / 2f
+            val outer = min(width, height) * 0.44f
+            val knob = outer * 0.42f
+            canvas.drawCircle(cx, cy, outer, basePaint)
+            canvas.drawCircle(cx, cy, outer, ringPaint)
+            canvas.drawCircle(cx + knobX, cy + knobY, knob, knobPaint)
+            canvas.drawCircle(cx + knobX, cy + knobY, knob, ringPaint)
+        }
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            val cx = width / 2f; val cy = height / 2f
+            val max = min(width, height) * 0.34f
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    var dx = e.x - cx; var dy = e.y - cy
+                    val d = sqrt(dx * dx + dy * dy)
+                    if (d > max && d > 0f) { dx = dx / d * max; dy = dy / d * max }
+                    knobX = dx; knobY = dy
+                    NativeBridge.setAnalog(((dx / max) * 32767).toInt(), ((dy / max) * 32767).toInt())
+                    invalidate()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    knobX = 0f; knobY = 0f; NativeBridge.setAnalog(0, 0); invalidate()
+                }
+            }
+            return true
+        }
+    }
+
+    inner class DPadView : View(this@GameActivity) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x8838383F.toInt() }
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xDDFFFFFF.toInt(); textSize = dp(24).toFloat(); textAlign = Paint.Align.CENTER }
+        private var activeId = -1
+        override fun onDraw(c: Canvas) {
+            val w = width / 3f; val h = height / 3f
+            c.drawRoundRect(w, 0f, 2*w, height.toFloat(), dp(8).toFloat(), dp(8).toFloat(), paint)
+            c.drawRoundRect(0f, h, width.toFloat(), 2*h, dp(8).toFloat(), dp(8).toFloat(), paint)
+            c.drawText("↑", width/2f, h*0.72f, textPaint); c.drawText("↓", width/2f, h*2.78f, textPaint)
+            c.drawText("←", w*0.5f, height/2f + textPaint.textSize/3, textPaint); c.drawText("→", w*2.5f, height/2f + textPaint.textSize/3, textPaint)
+        }
+        private fun idAt(x: Float, y: Float): Int {
+            val dx=x-width/2f; val dy=y-height/2f
+            return if (kotlin.math.abs(dx)>kotlin.math.abs(dy)) { if(dx<0)6 else 7 } else { if(dy<0)4 else 5 }
+        }
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            when(e.actionMasked){
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> { val id=idAt(e.x,e.y); if(id!=activeId){if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=id;NativeBridge.setButton(id,true)} }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=-1}
+            }
+            return true
+        }
+    }
+
+    private fun installPpssppAssets(root: File) {
+        val target = File(root, "PPSSPP")
+        val marker = File(target, ".emuhub_assets_v1")
+        if (marker.exists()) return
+        target.mkdirs(); copyAssetTree("PPSSPP", target); runCatching { marker.writeText("1") }
+    }
+    private fun copyAssetTree(path: String, target: File) {
+        val entries = assets.list(path) ?: return
+        if (entries.isEmpty()) { target.parentFile?.mkdirs(); assets.open(path).use { i -> target.outputStream().use { i.copyTo(it) } }; return }
+        target.mkdirs(); entries.forEach { copyAssetTree("$path/$it", File(target, it)) }
+    }
+    private fun safeStateKey(name: String) = MessageDigest.getInstance("SHA-256").digest(name.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
+
+    override fun onDestroy() {
+        gameView?.stop(); NativeBridge.setAnalog(0, 0); NativeBridge.unload(); super.onDestroy()
+    }
+
+    inner class GameView : View(this@GameActivity), Runnable {
+        private val running = AtomicBoolean(false)
+        private var frameW = NativeBridge.getWidth().coerceAtLeast(1)
+        private var frameH = NativeBridge.getHeight().coerceAtLeast(1)
+        private val pixels = IntArray(2048 * 2048)
+        @Volatile private var bitmap = Bitmap.createBitmap(frameW, frameH, Bitmap.Config.ARGB_8888)
+        private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        private var thread: Thread? = null
+        private val audioScratch = ShortArray(8192)
+        private var audioTrack: AudioTrack? = null
+
+        fun start() {
+            val rate = NativeBridge.getSampleRate().coerceAtLeast(8000)
+            val minBuffer = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
+            audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setBufferSizeInBytes(maxOf(minBuffer * 2, rate * 4 / 12))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                .build().also { it.play() }
+            if (running.compareAndSet(false, true)) thread = Thread(this, "EmuFrame").also { it.start() }
+        }
+        fun onFastForwardChanged(enabled: Boolean) { try { audioTrack?.pause(); audioTrack?.flush(); if (!enabled) audioTrack?.play() } catch (_: Exception) {} }
+        fun stop() { running.set(false); thread?.interrupt(); try { thread?.join(500) } catch (_: Exception) {}; try { audioTrack?.pause(); audioTrack?.flush(); audioTrack?.stop() } catch (_: Exception) {}; audioTrack?.release(); audioTrack=null }
+        override fun run() {
+            while (running.get()) {
+                val n = NativeBridge.runFrame(pixels)
+                if (n > 0) {
+                    val w = NativeBridge.getWidth().coerceIn(1, 2048); val h = NativeBridge.getHeight().coerceIn(1, 2048)
+                    if (w*h <= pixels.size) {
+                        if (w != frameW || h != frameH) { frameW=w; frameH=h; bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888) }
+                        bitmap.setPixels(pixels,0,w,0,0,w,h); postInvalidate()
+                    }
+                }
+                if (fastForward) { while (NativeBridge.readAudio(audioScratch)>0) {}; try { Thread.sleep(8) } catch (_:Exception) { break } }
+                else {
+                    var count=NativeBridge.readAudio(audioScratch)
+                    while(count>0 && running.get()) { var off=0; while(off<count && running.get()) { val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1; if(z>0)off+=z else break }; count=NativeBridge.readAudio(audioScratch) }
+                }
+            }
+        }
+        override fun onDraw(c: Canvas) {
+            super.onDraw(c)
+            val w=frameW.coerceAtLeast(1); val h=frameH.coerceAtLeast(1); val scale=minOf(width.toFloat()/w,height.toFloat()/h)
+            val dw=w*scale; val dh=h*scale
+            c.drawBitmap(bitmap,null,android.graphics.RectF((width-dw)/2f,(height-dh)/2f,(width+dw)/2f,(height+dh)/2f),paint)
+        }
     }
 }
