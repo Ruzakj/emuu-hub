@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="dev.eden.eden_emulator" />
+        <package android:name="dev.eden.eden_nightly" />
+        <package android:name="com.miHoYo.Yuanshen" />
+        <package android:name="com.miHoYo.Yunashen" />
+        <package android:name="com.miHoYo.Yuanshen.nightly" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/octet-stream" />
+        </intent>
+    </queries>
     <application android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true">
         <activity android:name=".GameActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
         <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:exported="true">
