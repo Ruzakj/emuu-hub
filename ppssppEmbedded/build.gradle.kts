@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "org.ppsspp.ppsspp"
-    compileSdk = 37
+    compileSdk = 36
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
@@ -70,5 +70,5 @@ protobuf {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.documentfile:documentfile:1.1.0")
-    implementation("com.google.protobuf:protobuf-javalite:4.35.1")
+    implementation("com.google.protobuf:protobuf-javalite:4.33.5")
 }
