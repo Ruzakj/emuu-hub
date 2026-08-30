@@ -17,6 +17,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.ric.emuhub.core.NativeBridge
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GameActivity : Activity() {
@@ -27,15 +28,22 @@ class GameActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val rom = intent.getStringExtra("romPath") ?: run { finish(); return }
-        val core = applicationInfo.nativeLibraryDir + "/libmgba_core.so"
+        val coreId = intent.getStringExtra("coreId") ?: "mgba"
+        val romName = intent.getStringExtra("romName") ?: File(rom).name
+        val coreFile = when (coreId) {
+            "fceumm" -> "libfceumm_core.so"
+            else -> "libmgba_core.so"
+        }
+        val coreLabel = if (coreId == "fceumm") "FCEUmm" else "mGBA"
+        val core = applicationInfo.nativeLibraryDir + "/$coreFile"
         val systemDir = File(filesDir, "system").apply { mkdirs() }.absolutePath
         val saveDirFile = File(filesDir, "saves").apply { mkdirs() }
         val saveDir = saveDirFile.absolutePath
-        stateFile = File(saveDirFile, "slot0.state")
+        stateFile = File(saveDirFile, "${coreId}_${safeStateKey(romName)}_slot0.state")
 
         if (!NativeBridge.init(core, systemDir, saveDir) || !NativeBridge.loadGame(rom)) {
             setContentView(TextView(this).apply {
-                text = "mGBA core gagal memuat ROM.\nPastikan file adalah .gb, .gbc, atau .gba."
+                text = "$coreLabel core gagal memuat ROM."
                 gravity = Gravity.CENTER
                 textSize = 18f
             })
@@ -51,6 +59,11 @@ class GameActivity : Activity() {
         root.addView(buildControls(), LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         gameView?.start()
+    }
+
+    private fun safeStateKey(name: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(name.toByteArray())
+        return digest.take(8).joinToString("") { "%02x".format(it) }
     }
 
     private fun buildUtilityControls(): View {
@@ -200,9 +213,7 @@ class GameActivity : Activity() {
                 }
 
                 if (fastForward) {
-                    while (NativeBridge.readAudio(audioScratch) > 0) {
-                        // Discard audio in fast-forward so audio clock does not cap emulation speed.
-                    }
+                    while (NativeBridge.readAudio(audioScratch) > 0) {}
                     try { Thread.sleep(8) } catch (_: InterruptedException) { break }
                 } else {
                     var audioCount = NativeBridge.readAudio(audioScratch)
@@ -215,11 +226,7 @@ class GameActivity : Activity() {
                                 audioCount - offset,
                                 AudioTrack.WRITE_BLOCKING
                             ) ?: -1
-                            if (written > 0) {
-                                offset += written
-                            } else {
-                                break
-                            }
+                            if (written > 0) offset += written else break
                         }
                         audioCount = NativeBridge.readAudio(audioScratch)
                     }
