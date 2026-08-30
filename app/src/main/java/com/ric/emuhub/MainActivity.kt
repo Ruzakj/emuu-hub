@@ -15,7 +15,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ROM = 1001
         private const val STATUS_VIEW_ID = 1002
-        private val SUPPORTED = setOf("gb", "gbc", "gba")
+        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +32,7 @@ class MainActivity : Activity() {
         })
         root.addView(TextView(this).apply {
             id = STATUS_VIEW_ID
-            text = "Offline emulator\nmGBA core: GB / GBC / GBA"
+            text = "Offline emulator\nmGBA: GB / GBC / GBA\nFCEUmm: NES"
             textSize = 16f
             gravity = Gravity.CENTER
             setPadding(0, 32, 0, 32)
@@ -73,8 +73,14 @@ class MainActivity : Activity() {
             "application/x-gba-rom", "application/x-gameboy-advance-rom" -> "gba"
             "application/x-gameboy-rom" -> "gb"
             "application/x-gameboy-color-rom" -> "gbc"
+            "application/x-nes-rom", "application/vnd.nintendo.snes.rom" -> "nes"
             else -> ""
         }
+    }
+
+    private fun coreIdFor(ext: String): String = when (ext) {
+        "nes" -> "fceumm"
+        else -> "mgba"
     }
 
     @Deprecated("Framework compatibility")
@@ -88,7 +94,7 @@ class MainActivity : Activity() {
 
         if (ext !in SUPPORTED) {
             findViewById<TextView>(STATUS_VIEW_ID).text =
-                "Format belum didukung: $name\nSaat ini: .gb / .gbc / .gba\nJika file masih .zip/.7z, ekstrak dulu ROM-nya."
+                "Format belum didukung: $name\nSaat ini: .gb / .gbc / .gba / .nes\nJika file masih .zip/.7z, ekstrak dulu ROM-nya."
             return
         }
 
@@ -104,7 +110,12 @@ class MainActivity : Activity() {
             if (out.length() == 0L) throw IllegalStateException("File ROM kosong")
 
             findViewById<TextView>(STATUS_VIEW_ID).text = "Membuka $name..."
-            startActivity(Intent(this, GameActivity::class.java).putExtra("romPath", out.absolutePath))
+            startActivity(
+                Intent(this, GameActivity::class.java)
+                    .putExtra("romPath", out.absolutePath)
+                    .putExtra("coreId", coreIdFor(ext))
+                    .putExtra("romName", name)
+            )
         } catch (e: Exception) {
             findViewById<TextView>(STATUS_VIEW_ID).text = "Gagal membuka ROM: ${e.message}"
         }
