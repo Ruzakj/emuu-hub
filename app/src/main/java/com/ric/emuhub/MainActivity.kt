@@ -15,7 +15,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ROM = 1001
         private const val STATUS_VIEW_ID = 1002
-        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes", "sfc", "smc")
+        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes", "sfc", "smc", "bin", "chd", "iso", "cso")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +32,7 @@ class MainActivity : Activity() {
         })
         root.addView(TextView(this).apply {
             id = STATUS_VIEW_ID
-            text = "Offline emulator\nmGBA: GB / GBC / GBA\nFCEUmm: NES\nSnes9x: SNES"
+            text = "Offline emulator\nmGBA: GB / GBC / GBA\nFCEUmm: NES\nSnes9x: SNES\nPCSX-ReARMed: PS1\nPPSSPP: PSP"
             textSize = 16f
             gravity = Gravity.CENTER
             setPadding(0, 32, 0, 32)
@@ -75,6 +75,7 @@ class MainActivity : Activity() {
             "application/x-gameboy-color-rom" -> "gbc"
             "application/x-nes-rom" -> "nes"
             "application/vnd.nintendo.snes.rom", "application/x-snes-rom", "application/x-super-nintendo-rom" -> "sfc"
+            "application/x-cd-image", "application/x-iso9660-image" -> "iso"
             else -> ""
         }
     }
@@ -82,6 +83,8 @@ class MainActivity : Activity() {
     private fun coreIdFor(ext: String): String = when (ext) {
         "nes" -> "fceumm"
         "sfc", "smc" -> "snes9x"
+        "bin", "chd" -> "pcsx"
+        "iso", "cso" -> "ppsspp"
         else -> "mgba"
     }
 
@@ -96,7 +99,7 @@ class MainActivity : Activity() {
 
         if (ext !in SUPPORTED) {
             findViewById<TextView>(STATUS_VIEW_ID).text =
-                "Format belum didukung: $name\nSaat ini: .gb / .gbc / .gba / .nes / .sfc / .smc\nJika file masih .zip/.7z, ekstrak dulu ROM-nya."
+                "Format belum didukung: $name\nGB/GBC/GBA: .gb .gbc .gba\nNES: .nes | SNES: .sfc .smc\nPS1: .bin .chd | PSP: .iso .cso\nJika file masih .zip/.7z, ekstrak dulu."
             return
         }
 
