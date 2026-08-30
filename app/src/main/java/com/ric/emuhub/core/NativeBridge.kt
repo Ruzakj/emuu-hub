@@ -4,6 +4,7 @@ object NativeBridge {
     init { System.loadLibrary("emuhost") }
 
     external fun init(corePath: String, systemDir: String, saveDir: String): Boolean
+    external fun setControllerDevice(device: Int)
     external fun loadGame(path: String): Boolean
     external fun runFrame(pixels: IntArray): Int
     external fun getWidth(): Int
