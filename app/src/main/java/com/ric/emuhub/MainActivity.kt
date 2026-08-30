@@ -8,7 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
-import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -73,7 +73,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 14, 0, 20)
         }
-        val scroll = ScrollView(this).apply { addView(library, ScrollView.LayoutParams(-1, -2)) }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(library, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         outer.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(outer)
     }
