@@ -10,6 +10,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        buildConfigField("String", "FLAVOR", "\"normal\"")
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
@@ -34,7 +35,11 @@ android {
         getByName("main") {
             manifest.srcFile("src/main/AndroidManifest.xml")
             java.srcDirs("../third_party/ppsspp/android/src")
-            res.srcDirs("../third_party/ppsspp/android/res", "../third_party/ppsspp/android/normal/res")
+            res.srcDirs(
+                "../third_party/ppsspp/android/res",
+                "../third_party/ppsspp/android/normal/res",
+                "../third_party/ppsspp/android/src/main/res"
+            )
             assets.srcDirs("../third_party/ppsspp/assets")
             aidl.srcDirs("../third_party/ppsspp/android/src")
         }
