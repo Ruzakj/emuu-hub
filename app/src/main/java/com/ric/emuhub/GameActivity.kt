@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class GameActivity : Activity() {
     private var gameView: GameView? = null
-    private var fastForward = false
+    @Volatile private var fastForward = false
     private lateinit var stateFile: File
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,7 +42,10 @@ class GameActivity : Activity() {
             return
         }
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF09090B.toInt()) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF09090B.toInt())
+        }
         gameView = GameView().also { root.addView(it, LinearLayout.LayoutParams(-1, 0, 1f)) }
         root.addView(buildUtilityControls(), LinearLayout.LayoutParams(-1, -2))
         root.addView(buildControls(), LinearLayout.LayoutParams(-1, -2))
@@ -51,7 +54,11 @@ class GameActivity : Activity() {
     }
 
     private fun buildUtilityControls(): View {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(8, 4, 8, 0) }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(8, 4, 8, 0)
+        }
 
         row.addView(Button(this).apply {
             text = "SAVE"
@@ -74,6 +81,7 @@ class GameActivity : Activity() {
             setOnClickListener {
                 fastForward = !fastForward
                 text = if (fastForward) "FAST ON" else "FAST 2×"
+                gameView?.onFastForwardChanged(fastForward)
             }
         }, LinearLayout.LayoutParams(0, -2, 1f))
 
@@ -86,7 +94,11 @@ class GameActivity : Activity() {
     }
 
     private fun buildControls(): View {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(8, 8, 8, 12) }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 12)
+        }
         listOf(
             "←" to 6, "↑" to 4, "↓" to 5, "→" to 7,
             "L" to 10, "SELECT" to 2, "START" to 3, "R" to 11,
@@ -114,7 +126,7 @@ class GameActivity : Activity() {
         super.onDestroy()
     }
 
-    inner class GameView : View(this), Runnable {
+    inner class GameView : View(this@GameActivity), Runnable {
         private val running = AtomicBoolean(false)
         private val widthPx = NativeBridge.getWidth().coerceAtLeast(1)
         private val heightPx = NativeBridge.getHeight().coerceAtLeast(1)
@@ -127,11 +139,13 @@ class GameActivity : Activity() {
 
         fun start() {
             val rate = NativeBridge.getSampleRate().coerceAtLeast(8000)
-            val minBuffer = AudioTrack.getMinBufferSize(
+            val minBufferBytes = AudioTrack.getMinBufferSize(
                 rate,
                 AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT
-            ).coerceAtLeast(rate / 4)
+            ).coerceAtLeast(4096)
+            val targetBufferBytes = maxOf(minBufferBytes * 2, rate * 4 / 12)
+
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -146,16 +160,32 @@ class GameActivity : Activity() {
                         .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                         .build()
                 )
-                .setBufferSizeInBytes(minBuffer * 2)
+                .setBufferSizeInBytes(targetBufferBytes)
                 .setTransferMode(AudioTrack.MODE_STREAM)
+                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .build().also { it.play() }
 
-            if (running.compareAndSet(false, true)) thread = Thread(this, "EmuFrame").also { it.start() }
+            if (running.compareAndSet(false, true)) {
+                thread = Thread(this, "EmuFrame").also { it.start() }
+            }
+        }
+
+        fun onFastForwardChanged(enabled: Boolean) {
+            if (enabled) {
+                try { audioTrack?.pause() } catch (_: Exception) {}
+                try { audioTrack?.flush() } catch (_: Exception) {}
+            } else {
+                try { audioTrack?.flush() } catch (_: Exception) {}
+                try { audioTrack?.play() } catch (_: Exception) {}
+            }
         }
 
         fun stop() {
             running.set(false)
+            thread?.interrupt()
             try { thread?.join(500) } catch (_: InterruptedException) {}
+            try { audioTrack?.pause() } catch (_: Exception) {}
+            try { audioTrack?.flush() } catch (_: Exception) {}
             try { audioTrack?.stop() } catch (_: Exception) {}
             audioTrack?.release()
             audioTrack = null
@@ -169,21 +199,41 @@ class GameActivity : Activity() {
                     postInvalidate()
                 }
 
-                var audioCount = NativeBridge.readAudio(audioScratch)
-                while (audioCount > 0) {
-                    audioTrack?.write(audioScratch, 0, audioCount, AudioTrack.WRITE_NON_BLOCKING)
-                    audioCount = NativeBridge.readAudio(audioScratch)
+                if (fastForward) {
+                    while (NativeBridge.readAudio(audioScratch) > 0) {
+                        // Discard audio in fast-forward so audio clock does not cap emulation speed.
+                    }
+                    try { Thread.sleep(8) } catch (_: InterruptedException) { break }
+                } else {
+                    var audioCount = NativeBridge.readAudio(audioScratch)
+                    while (audioCount > 0 && running.get()) {
+                        var offset = 0
+                        while (offset < audioCount && running.get()) {
+                            val written = audioTrack?.write(
+                                audioScratch,
+                                offset,
+                                audioCount - offset,
+                                AudioTrack.WRITE_BLOCKING
+                            ) ?: -1
+                            if (written > 0) {
+                                offset += written
+                            } else {
+                                break
+                            }
+                        }
+                        audioCount = NativeBridge.readAudio(audioScratch)
+                    }
                 }
-
-                try { Thread.sleep(if (fastForward) 8 else 16) } catch (_: InterruptedException) { break }
             }
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val scale = minOf(width.toFloat() / widthPx, height.toFloat() / heightPx)
-            val dw = widthPx * scale; val dh = heightPx * scale
-            val left = (width - dw) / 2f; val top = (height - dh) / 2f
+            val dw = widthPx * scale
+            val dh = heightPx * scale
+            val left = (width - dw) / 2f
+            val top = (height - dh) / 2f
             canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, top, left + dw, top + dh), paint)
         }
     }
