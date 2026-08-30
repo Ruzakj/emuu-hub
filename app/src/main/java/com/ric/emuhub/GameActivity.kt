@@ -24,6 +24,8 @@ class GameActivity : Activity() {
     private var gameView: GameView? = null
     @Volatile private var fastForward = false
     private lateinit var stateFile: File
+    private var analogX = 0
+    private var analogY = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,22 +35,34 @@ class GameActivity : Activity() {
         val coreFile = when (coreId) {
             "fceumm" -> "libfceumm_core.so"
             "snes9x" -> "libsnes9x_core.so"
+            "pcsx" -> "libpcsx_rearmed_core.so"
+            "ppsspp" -> "libppsspp_core.so"
             else -> "libmgba_core.so"
         }
         val coreLabel = when (coreId) {
             "fceumm" -> "FCEUmm"
             "snes9x" -> "Snes9x"
+            "pcsx" -> "PCSX-ReARMed"
+            "ppsspp" -> "PPSSPP"
             else -> "mGBA"
         }
+
+        val systemRoot = File(filesDir, "system").apply { mkdirs() }
+        if (coreId == "ppsspp") installPpssppAssets(systemRoot)
+
         val core = applicationInfo.nativeLibraryDir + "/$coreFile"
-        val systemDir = File(filesDir, "system").apply { mkdirs() }.absolutePath
+        val systemDir = systemRoot.absolutePath
         val saveDirFile = File(filesDir, "saves").apply { mkdirs() }
         val saveDir = saveDirFile.absolutePath
         stateFile = File(saveDirFile, "${coreId}_${safeStateKey(romName)}_slot0.state")
 
         if (!NativeBridge.init(core, systemDir, saveDir) || !NativeBridge.loadGame(rom)) {
             setContentView(TextView(this).apply {
-                text = "$coreLabel core gagal memuat ROM."
+                text = if (coreId == "ppsspp") {
+                    "PPSSPP core gagal memuat game.\nJika build core berhasil tapi layar tetap hitam, host GPU OpenGL/Vulkan masih perlu ditambahkan."
+                } else {
+                    "$coreLabel core gagal memuat ROM."
+                }
                 gravity = Gravity.CENTER
                 textSize = 18f
             })
@@ -61,9 +75,32 @@ class GameActivity : Activity() {
         }
         gameView = GameView().also { root.addView(it, LinearLayout.LayoutParams(-1, 0, 1f)) }
         root.addView(buildUtilityControls(), LinearLayout.LayoutParams(-1, -2))
+        if (coreId == "pcsx" || coreId == "ppsspp") {
+            root.addView(buildAnalogControls(), LinearLayout.LayoutParams(-1, -2))
+        }
         root.addView(buildControls(coreId), LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         gameView?.start()
+    }
+
+    private fun installPpssppAssets(systemRoot: File) {
+        val target = File(systemRoot, "PPSSPP")
+        val marker = File(target, ".emuhub_assets_v1")
+        if (marker.exists()) return
+        target.mkdirs()
+        copyAssetTree("PPSSPP", target)
+        runCatching { marker.writeText("1") }
+    }
+
+    private fun copyAssetTree(assetPath: String, target: File) {
+        val entries = assets.list(assetPath) ?: return
+        if (entries.isEmpty()) {
+            target.parentFile?.mkdirs()
+            assets.open(assetPath).use { input -> target.outputStream().use { input.copyTo(it) } }
+            return
+        }
+        target.mkdirs()
+        entries.forEach { name -> copyAssetTree("$assetPath/$name", File(target, name)) }
     }
 
     private fun safeStateKey(name: String): String {
@@ -111,6 +148,36 @@ class GameActivity : Activity() {
         return row
     }
 
+    private fun buildAnalogControls(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(8, 2, 8, 2)
+        }
+        listOf("A←" to Pair(-32767, 0), "A↑" to Pair(0, -32767), "A↓" to Pair(0, 32767), "A→" to Pair(32767, 0)).forEach { (label, axis) ->
+            row.addView(Button(this).apply {
+                text = label
+                minWidth = 0
+                setOnTouchListener { _, e ->
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            if (axis.first != 0) analogX = axis.first
+                            if (axis.second != 0) analogY = axis.second
+                            NativeBridge.setAnalog(analogX, analogY)
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            if (axis.first != 0) analogX = 0
+                            if (axis.second != 0) analogY = 0
+                            NativeBridge.setAnalog(analogX, analogY)
+                        }
+                    }
+                    true
+                }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        return row
+    }
+
     private fun buildControls(coreId: String): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -122,9 +189,13 @@ class GameActivity : Activity() {
             "L" to 10, "SELECT" to 2, "START" to 3, "R" to 11,
             "B" to 0, "A" to 8
         )
-        if (coreId == "snes9x") {
+        if (coreId == "snes9x" || coreId == "pcsx" || coreId == "ppsspp") {
             controls.add("Y" to 1)
             controls.add("X" to 9)
+        }
+        if (coreId == "pcsx") {
+            controls.add("L2" to 12)
+            controls.add("R2" to 13)
         }
         controls.forEach { (label, id) ->
             val b = Button(this).apply {
@@ -145,6 +216,7 @@ class GameActivity : Activity() {
 
     override fun onDestroy() {
         gameView?.stop()
+        NativeBridge.setAnalog(0, 0)
         NativeBridge.unload()
         super.onDestroy()
     }
