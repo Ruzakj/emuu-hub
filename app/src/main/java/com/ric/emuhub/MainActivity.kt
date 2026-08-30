@@ -15,7 +15,8 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_ROM = 1001
         private const val STATUS_VIEW_ID = 1002
-        private val SUPPORTED = setOf("gb", "gbc", "gba", "nes", "sfc", "smc", "bin", "chd", "iso", "cso")
+        private val PLAYABLE = setOf("gb", "gbc", "gba", "nes", "sfc", "smc", "bin", "chd", "iso", "cso")
+        private val RECOGNIZED = PLAYABLE + "ecm"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,7 +68,7 @@ class MainActivity : Activity() {
     private fun detectExtension(uri: Uri): String {
         val name = displayName(uri).orEmpty()
         val fromName = name.substringAfterLast('.', "").lowercase()
-        if (fromName in SUPPORTED) return fromName
+        if (fromName in RECOGNIZED) return fromName
 
         return when (contentResolver.getType(uri)?.lowercase()) {
             "application/x-gba-rom", "application/x-gameboy-advance-rom" -> "gba"
@@ -80,11 +81,38 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun coreIdFor(ext: String): String = when (ext) {
+    private fun containsAscii(file: File, token: String, maxBytes: Int = 4 * 1024 * 1024): Boolean {
+        val needle = token.toByteArray(Charsets.US_ASCII)
+        if (needle.isEmpty()) return false
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0
+            var carry = ByteArray(0)
+            while (total < maxBytes) {
+                val want = minOf(buffer.size, maxBytes - total)
+                val read = input.read(buffer, 0, want)
+                if (read <= 0) break
+                total += read
+                val data = ByteArray(carry.size + read)
+                carry.copyInto(data, 0)
+                buffer.copyInto(data, carry.size, 0, read)
+                outer@ for (i in 0..data.size - needle.size) {
+                    for (j in needle.indices) if (data[i + j] != needle[j]) continue@outer
+                    return true
+                }
+                val keep = minOf(needle.size - 1, data.size)
+                carry = data.copyOfRange(data.size - keep, data.size)
+            }
+        }
+        return false
+    }
+
+    private fun coreIdFor(ext: String, file: File): String = when (ext) {
         "nes" -> "fceumm"
         "sfc", "smc" -> "snes9x"
         "bin", "chd" -> "pcsx"
-        "iso", "cso" -> "ppsspp"
+        "cso" -> "ppsspp"
+        "iso" -> if (containsAscii(file, "PSP_GAME")) "ppsspp" else "pcsx"
         else -> "mgba"
     }
 
@@ -97,9 +125,15 @@ class MainActivity : Activity() {
         val name = displayName(uri) ?: "ROM"
         val ext = detectExtension(uri)
 
-        if (ext !in SUPPORTED) {
+        if (ext == "ecm") {
             findViewById<TextView>(STATUS_VIEW_ID).text =
-                "Format belum didukung: $name\nGB/GBC/GBA: .gb .gbc .gba\nNES: .nes | SNES: .sfc .smc\nPS1: .bin .chd | PSP: .iso .cso\nJika file masih .zip/.7z, ekstrak dulu."
+                "PS1 ECM terdeteksi: $name\nECM harus di-decode menjadi .bin/.iso sebelum dijalankan.\nDecoder ECM internal belum dibundel."
+            return
+        }
+
+        if (ext !in PLAYABLE) {
+            findViewById<TextView>(STATUS_VIEW_ID).text =
+                "Format belum didukung: $name\nGB/GBC/GBA: .gb .gbc .gba\nNES: .nes | SNES: .sfc .smc\nPS1: .bin .chd .iso | PSP: .iso .cso\nJika file masih .zip/.7z, ekstrak dulu."
             return
         }
 
@@ -114,11 +148,17 @@ class MainActivity : Activity() {
 
             if (out.length() == 0L) throw IllegalStateException("File ROM kosong")
 
-            findViewById<TextView>(STATUS_VIEW_ID).text = "Membuka $name..."
+            val coreId = coreIdFor(ext, out)
+            val systemLabel = when (coreId) {
+                "pcsx" -> "PS1"
+                "ppsspp" -> "PSP"
+                else -> "game"
+            }
+            findViewById<TextView>(STATUS_VIEW_ID).text = "Membuka $name ($systemLabel)..."
             startActivity(
                 Intent(this, GameActivity::class.java)
                     .putExtra("romPath", out.absolutePath)
-                    .putExtra("coreId", coreIdFor(ext))
+                    .putExtra("coreId", coreId)
                     .putExtra("romName", name)
             )
         } catch (e: Exception) {
