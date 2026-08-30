@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(emuhost)
-add_library(emuhost SHARED emuhost.cpp)
+add_library(emuhost SHARED emuhost.cpp ecm_decoder.cpp)
 target_link_libraries(emuhost android log dl)
 set_target_properties(emuhost PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
