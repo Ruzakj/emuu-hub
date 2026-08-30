@@ -32,9 +32,14 @@ class GameActivity : Activity() {
         val romName = intent.getStringExtra("romName") ?: File(rom).name
         val coreFile = when (coreId) {
             "fceumm" -> "libfceumm_core.so"
+            "snes9x" -> "libsnes9x_core.so"
             else -> "libmgba_core.so"
         }
-        val coreLabel = if (coreId == "fceumm") "FCEUmm" else "mGBA"
+        val coreLabel = when (coreId) {
+            "fceumm" -> "FCEUmm"
+            "snes9x" -> "Snes9x"
+            else -> "mGBA"
+        }
         val core = applicationInfo.nativeLibraryDir + "/$coreFile"
         val systemDir = File(filesDir, "system").apply { mkdirs() }.absolutePath
         val saveDirFile = File(filesDir, "saves").apply { mkdirs() }
@@ -56,7 +61,7 @@ class GameActivity : Activity() {
         }
         gameView = GameView().also { root.addView(it, LinearLayout.LayoutParams(-1, 0, 1f)) }
         root.addView(buildUtilityControls(), LinearLayout.LayoutParams(-1, -2))
-        root.addView(buildControls(), LinearLayout.LayoutParams(-1, -2))
+        root.addView(buildControls(coreId), LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         gameView?.start()
     }
@@ -106,17 +111,22 @@ class GameActivity : Activity() {
         return row
     }
 
-    private fun buildControls(): View {
+    private fun buildControls(coreId: String): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 12)
         }
-        listOf(
+        val controls = mutableListOf(
             "←" to 6, "↑" to 4, "↓" to 5, "→" to 7,
             "L" to 10, "SELECT" to 2, "START" to 3, "R" to 11,
             "B" to 0, "A" to 8
-        ).forEach { (label, id) ->
+        )
+        if (coreId == "snes9x") {
+            controls.add("Y" to 1)
+            controls.add("X" to 9)
+        }
+        controls.forEach { (label, id) ->
             val b = Button(this).apply {
                 text = label
                 minWidth = 0
