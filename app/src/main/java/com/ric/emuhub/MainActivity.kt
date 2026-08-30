@@ -18,9 +18,11 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
+import com.ric.emuhub.core.NativeBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -32,9 +34,9 @@ class MainActivity : Activity() {
         private const val KEY_ROM_TREE_LEGACY = "rom_tree"
         private const val KEY_ROM_TREES = "rom_trees"
         private const val KEY_LIBRARY_CACHE = "library_cache_v2"
-        private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso")
+        private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")
         private val SWITCH = setOf("xci","nsp","nro")
-        private val RECOGNIZED = INTERNAL + SWITCH + "ecm"
+        private val RECOGNIZED = INTERNAL + SWITCH
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
     }
 
@@ -114,10 +116,10 @@ class MainActivity : Activity() {
     }
 
     private fun rounded(color:Int,radius:Float)=GradientDrawable().apply{setColor(color);cornerRadius=radius}
-    private fun systemCode(e:String)=when(e){"gb","gbc","gba"->"GBA";"nes"->"NES";"sfc","smc"->"SNES";"bin","cue","chd"->"PS1";"iso"->"ISO";"cso"->"PSP";"xci","nsp","nro"->"NSW";else->e.uppercase().take(4)}
-    private fun systemColor(e:String)=when(e){"xci","nsp","nro"->0xFF315A75.toInt();"bin","cue","chd","iso"->0xFF493D68.toInt();"cso"->0xFF314E68.toInt();"gba","gb","gbc"->0xFF355B49.toInt();else->0xFF41444F.toInt()}
+    private fun systemCode(e:String)=when(e){"gb","gbc","gba"->"GBA";"nes"->"NES";"sfc","smc"->"SNES";"bin","cue","chd"->"PS1";"ecm"->"ECM";"iso"->"ISO";"cso"->"PSP";"xci","nsp","nro"->"NSW";else->e.uppercase().take(4)}
+    private fun systemColor(e:String)=when(e){"xci","nsp","nro"->0xFF315A75.toInt();"bin","cue","chd","iso","ecm"->0xFF493D68.toInt();"cso"->0xFF314E68.toInt();"gba","gb","gbc"->0xFF355B49.toInt();else->0xFF41444F.toInt()}
 
-    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in SWITCH->launchEden(uri);ext=="ecm"->Toast.makeText(this,"ECM perlu di-decode ke BIN/ISO",Toast.LENGTH_LONG).show();ext=="iso"->showIsoChooser(uri,name);else->copyAndLaunchInternal(uri,name,ext,null)}}
+    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);else->copyAndLaunchInternal(uri,name,ext,null)}}
 
     private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Buka ISO sebagai").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP")){_,which->copyAndLaunchInternal(uri,name,"iso",if(which==0)"pcsx" else "ppsspp")}.setNegativeButton("Batal",null).show()}
 
@@ -125,16 +127,42 @@ class MainActivity : Activity() {
 
     private fun displayName(uri:Uri):String?{if(uri.scheme=="content")contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use{c->if(c.moveToFirst()){val i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(i>=0)return c.getString(i)}};return uri.lastPathSegment?.substringAfterLast('/')}
     private fun extension(name:String?)=name.orEmpty().substringAfterLast('.',"").lowercase()
-    private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"NES • FCEUmm";"sfc","smc"->"SNES • Snes9x";"bin","cue","chd"->"PlayStation • PCSX-ReARMed";"iso"->"PS1 / PSP • pilih saat dibuka";"cso"->"PSP • PPSSPP";"xci","nsp","nro"->"Switch • Eden Optimized";"ecm"->"PlayStation • ECM";else->"ROM"}
+    private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"NES • FCEUmm";"sfc","smc"->"SNES • Snes9x";"bin","cue","chd"->"PlayStation • PCSX-ReARMed";"ecm"->"PlayStation • compressed • auto decode";"iso"->"PS1 / PSP • pilih saat dibuka";"cso"->"PSP • PPSSPP";"xci","nsp","nro"->"Switch • Eden Optimized";else->"ROM"}
 
-    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){try{status.text="Membuka $name...";val dir=File(cacheDir,"roms").apply{mkdirs()};val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_");val out=File(dir,safe);contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("ROM tidak dapat dibaca");val core=forcedCore?:coreIdFor(ext);startActivity(Intent(this,GameActivity::class.java).putExtra("romPath",out.absolutePath).putExtra("coreId",core).putExtra("romName",name))}catch(e:Exception){status.text="Gagal membuka ROM: ${e.message}"}}
+    private fun cacheKey(value:String):String=MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}.take(24)
+
+    private fun decodeAndLaunchEcm(uri:Uri,name:String){
+        status.text="Preparing ECM..."
+        scanExecutor.execute{
+            try{
+                val dir=File(cacheDir,"ecm").apply{mkdirs()}
+                val key=cacheKey(uri.toString())
+                val source=File(dir,"$key.ecm")
+                val decoded=File(dir,"$key.bin")
+                if(!decoded.exists()||decoded.length()==0L){
+                    runOnUiThread{status.text="Decompressing ECM • $name"}
+                    contentResolver.openInputStream(uri)?.use{input->source.outputStream().use{input.copyTo(it)}}?:error("ECM tidak dapat dibaca")
+                    if(!NativeBridge.decodeEcm(source.absolutePath,decoded.absolutePath))error("ECM corrupt / decode gagal")
+                }
+                source.delete()
+                runOnUiThread{
+                    status.text="ECM siap • membuka PS1"
+                    launchInternalFile(decoded,"pcsx",name.removeSuffix(".ecm"))
+                }
+            }catch(e:Exception){runOnUiThread{status.text="Gagal decode ECM: ${e.message}";Toast.makeText(this,"ECM gagal dibuka: ${e.message}",Toast.LENGTH_LONG).show()}}
+        }
+    }
+
+    private fun launchInternalFile(file:File,core:String,name:String){startActivity(Intent(this,GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("coreId",core).putExtra("romName",name))}
+
+    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){try{status.text="Membuka $name...";val dir=File(cacheDir,"roms").apply{mkdirs()};val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_");val out=File(dir,safe);contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("ROM tidak dapat dibaca");val core=forcedCore?:coreIdFor(ext);launchInternalFile(out,core,name)}catch(e:Exception){status.text="Gagal membuka ROM: ${e.message}"}}
     private fun coreIdFor(ext:String)=when(ext){"nes"->"fceumm";"sfc","smc"->"snes9x";"bin","cue","chd"->"pcsx";"cso"->"ppsspp";else->"mgba"}
 
     private fun saveCache(games:List<GameEntry>){val arr=JSONArray();games.forEach{g->arr.put(JSONObject().put("u",g.uri).put("n",g.name).put("e",g.ext).put("f",g.folder))};prefs.edit().putString(KEY_LIBRARY_CACHE,arr.toString()).apply()}
     private fun loadCache():List<GameEntry>{return runCatching{val arr=JSONArray(prefs.getString(KEY_LIBRARY_CACHE,"[]"));buildList{for(i in 0 until arr.length()){val o=arr.getJSONObject(i);add(GameEntry(o.getString("u"),o.getString("n"),o.getString("e"),o.optString("f")))}}}.getOrDefault(emptyList())}
 
     @Deprecated("Framework compatibility")
-    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK)return;if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return};if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in SWITCH->launchEden(uri);ext=="iso"->showIsoChooser(uri,name);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}}
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK)return;if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return};if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}}
 
     override fun onDestroy(){scanExecutor.shutdownNow();super.onDestroy()}
 }
