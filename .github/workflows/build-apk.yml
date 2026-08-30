@@ -31,7 +31,28 @@ jobs:
       - name: Install required Android toolchain
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "ndk;27.0.12077973" "cmake;3.22.1"
+          sdkmanager "platforms;android-35" "platforms;android-37" "ndk;27.0.12077973" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Restore PPSSPP v1.20.4 source
+        id: ppsspp-source-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/ppsspp
+          key: ppsspp-standalone-source-v1.20.4-r1
+
+      - name: Fetch PPSSPP standalone source
+        if: steps.ppsspp-source-cache.outputs.cache-hit != 'true'
+        run: |
+          rm -rf third_party/ppsspp
+          mkdir -p third_party
+          git clone --depth 1 --branch v1.20.4 --recurse-submodules --shallow-submodules https://github.com/hrydgard/ppsspp.git third_party/ppsspp
+
+      - name: Verify PPSSPP source
+        run: |
+          test -s third_party/ppsspp/CMakeLists.txt
+          test -s third_party/ppsspp/android/src/org/ppsspp/ppsspp/PpssppActivity.java
+          test -d third_party/ppsspp/assets
+          rm -f app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
 
       - name: Restore cached mGBA core
         id: mgba-cache
@@ -101,50 +122,12 @@ jobs:
           test -n "$CORE"
           cp "$CORE" app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
 
-      - name: Restore cached PPSSPP core
-        id: ppsspp-cache
-        uses: actions/cache@v4
-        with:
-          path: app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
-          key: ppsspp-arm64-libretro-v1
-
-      - name: Download PPSSPP ARM64 core on cache miss
-        if: steps.ppsspp-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p app/src/main/jniLibs/arm64-v8a /tmp/ppsspp
-          curl --retry 3 --retry-delay 2 -fL "https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/ppsspp_libretro_android.so.zip" -o /tmp/ppsspp.zip
-          unzip -q /tmp/ppsspp.zip -d /tmp/ppsspp
-          CORE=$(find /tmp/ppsspp -type f -name '*.so' | head -n 1)
-          test -n "$CORE"
-          cp "$CORE" app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
-
-      - name: Restore cached PPSSPP assets
-        id: ppsspp-assets-cache
-        uses: actions/cache@v4
-        with:
-          path: app/src/main/assets/PPSSPP
-          key: ppsspp-assets-v1
-
-      - name: Download PPSSPP required assets on cache miss
-        if: steps.ppsspp-assets-cache.outputs.cache-hit != 'true'
-        run: |
-          rm -rf /tmp/ppsspp-src app/src/main/assets/PPSSPP
-          mkdir -p /tmp/ppsspp-src app/src/main/assets/PPSSPP
-          curl --retry 3 --retry-delay 2 -fL "https://github.com/hrydgard/ppsspp/archive/refs/heads/master.zip" -o /tmp/ppsspp-src.zip
-          unzip -q /tmp/ppsspp-src.zip -d /tmp/ppsspp-src
-          ASSETS=$(find /tmp/ppsspp-src -type d -path '*/assets' | head -n 1)
-          test -n "$ASSETS"
-          cp -a "$ASSETS"/. app/src/main/assets/PPSSPP/
-
-      - name: Verify bundled cores and PSP assets
+      - name: Verify libretro cores
         run: |
           test -s app/src/main/jniLibs/arm64-v8a/libmgba_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libfceumm_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
-          test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
-          test -d app/src/main/assets/PPSSPP
-          test -n "$(find app/src/main/assets/PPSSPP -type f | head -n 1)"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -155,15 +138,16 @@ jobs:
       - name: Build offline emulator APK
         run: gradle assembleDebug --build-cache --parallel --stacktrace
 
-      - name: Verify embedded native cores
+      - name: Verify embedded engines
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/arm64-v8a/(libemuhost|libmgba_core|libfceumm_core|libsnes9x_core|libpcsx_rearmed_core|libppsspp_core)\.so'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'assets/PPSSPP/' | head
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/arm64-v8a/(libemuhost|libmgba_core|libfceumm_core|libsnes9x_core|libpcsx_rearmed_core|libppsspp_jni)\.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/lang/'
+          ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'libppsspp_core.so'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EmuHub-GB-GBA-NES-SNES-PS1-PSP-debug
+          name: EmuHub-PPSSPP-BuiltIn-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           compression-level: 0
           if-no-files-found: error
