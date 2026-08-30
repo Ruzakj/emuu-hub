@@ -36,7 +36,6 @@ android {
             java.srcDirs("../third_party/ppsspp/android/src")
             res.srcDirs("../third_party/ppsspp/android/res", "../third_party/ppsspp/android/normal/res")
             assets.srcDirs("../third_party/ppsspp/assets")
-            proto.srcDirs("../third_party/ppsspp/android/src/main/proto")
             aidl.srcDirs("../third_party/ppsspp/android/src")
         }
     }
