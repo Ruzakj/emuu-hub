@@ -60,37 +60,49 @@ class MainActivity : Activity() {
         }
     }
 
-    /* ISO9660 directory records contain PSP_GAME well beyond the first few MB on some dumps.
-       Read the Primary Volume Descriptor and root directory instead of guessing from an early byte scan. */
-    private fun isPspIso(file: File): Boolean {
+    private fun containsAscii(file: File, token: String, maxBytes: Long = 64L * 1024 * 1024): Boolean {
+        val needle = token.toByteArray(Charsets.US_ASCII)
+        if (needle.isEmpty()) return false
         return runCatching {
-            RandomAccessFile(file, "r").use { raf ->
-                val sector = 2048L
-                val pvd = ByteArray(2048)
-                raf.seek(16L * sector); raf.readFully(pvd)
-                if (String(pvd, 1, 5, Charsets.US_ASCII) != "CD001") return@use false
-                val root = 156
-                fun le32(o: Int): Long = (pvd[o].toLong() and 255) or ((pvd[o+1].toLong() and 255) shl 8) or ((pvd[o+2].toLong() and 255) shl 16) or ((pvd[o+3].toLong() and 255) shl 24)
-                val rootLba = le32(root + 2)
-                val rootSize = le32(root + 10).coerceAtMost(4L * 1024 * 1024)
-                if (rootLba <= 0 || rootSize <= 0) return@use false
-                val data = ByteArray(rootSize.toInt())
-                raf.seek(rootLba * sector); raf.readFully(data)
-                var pos = 0
-                while (pos < data.size) {
-                    val len = data[pos].toInt() and 255
-                    if (len == 0) { pos = ((pos / 2048) + 1) * 2048; continue }
-                    if (pos + len > data.size || len < 34) break
-                    val nameLen = data[pos + 32].toInt() and 255
-                    if (pos + 33 + nameLen <= data.size) {
-                        val entry = String(data, pos + 33, nameLen, Charsets.US_ASCII).substringBefore(';')
-                        if (entry.equals("PSP_GAME", true) || entry.equals("UMD_VIDEO", true) || entry.equals("UMD_AUDIO", true)) return@use true
+            file.inputStream().buffered().use { input ->
+                val buffer = ByteArray(256 * 1024)
+                var carry = ByteArray(0)
+                var total = 0L
+                while (total < maxBytes) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), maxBytes - total).toInt())
+                    if (read <= 0) break
+                    total += read
+                    val data = ByteArray(carry.size + read)
+                    carry.copyInto(data)
+                    buffer.copyInto(data, carry.size, 0, read)
+                    outer@ for (i in 0..data.size - needle.size) {
+                        for (j in needle.indices) if (data[i + j] != needle[j]) continue@outer
+                        return@use true
                     }
-                    pos += len
+                    val keep = minOf(needle.size - 1, data.size)
+                    carry = data.copyOfRange(data.size - keep, data.size)
                 }
                 false
             }
         }.getOrDefault(false)
+    }
+
+    private fun isPspIso(file: File): Boolean {
+        if (containsAscii(file, "PSP_GAME") || containsAscii(file, "UMD_VIDEO") || containsAscii(file, "UMD_AUDIO")) return true
+        return runCatching {
+            RandomAccessFile(file, "r").use { raf ->
+                if (raf.length() < 18L * 2048) return@use false
+                val pvd = ByteArray(2048)
+                raf.seek(16L * 2048); raf.readFully(pvd)
+                String(pvd, 1, 5, Charsets.US_ASCII) == "CD001" && containsAscii(file, "PSP", 96L * 1024 * 1024)
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun isPs1Iso(file: File): Boolean {
+        return containsAscii(file, "SYSTEM.CNF") ||
+            containsAscii(file, "PS-X EXE") ||
+            containsAscii(file, "PLAYSTATION")
     }
 
     private fun coreIdFor(ext: String, file: File): String = when (ext) {
@@ -98,7 +110,11 @@ class MainActivity : Activity() {
         "sfc", "smc" -> "snes9x"
         "bin", "cue", "chd" -> "pcsx"
         "cso" -> "ppsspp"
-        "iso" -> if (isPspIso(file)) "ppsspp" else "pcsx"
+        "iso" -> when {
+            isPspIso(file) -> "ppsspp"
+            isPs1Iso(file) -> "pcsx"
+            else -> "ppsspp"
+        }
         else -> "mgba"
     }
 
