@@ -29,6 +29,7 @@ class MainActivity : Activity() {
         private const val REQUEST_ROM = 1001
         private const val REQUEST_FOLDER = 1002
         private const val PREFS = "emuhub_library"
+        private const val KEY_ROM_TREE_LEGACY = "rom_tree"
         private const val KEY_ROM_TREES = "rom_trees"
         private const val KEY_LIBRARY_CACHE = "library_cache_v2"
         private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso")
@@ -46,11 +47,19 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        migrateLegacyFolder()
         renderHome()
         val cached = loadCache()
         if (cached.isNotEmpty()) renderLibrary(cached, "${cached.size} game • cache")
         else status.text = "Tambah folder ROM untuk membuat library."
         refreshAllFolders(false)
+    }
+
+    private fun migrateLegacyFolder(){
+        val old=prefs.getString(KEY_ROM_TREE_LEGACY,null)?:return
+        val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf()
+        if(set.add(old))prefs.edit().putStringSet(KEY_ROM_TREES,set).remove(KEY_ROM_TREE_LEGACY).apply()
+        else prefs.edit().remove(KEY_ROM_TREE_LEGACY).apply()
     }
 
     private fun renderHome() {
