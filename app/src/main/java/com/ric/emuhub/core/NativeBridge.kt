@@ -8,6 +8,10 @@ object NativeBridge {
     external fun runFrame(pixels: IntArray): Int
     external fun getWidth(): Int
     external fun getHeight(): Int
+    external fun getSampleRate(): Int
+    external fun readAudio(samples: ShortArray): Int
+    external fun saveState(path: String): Boolean
+    external fun loadState(path: String): Boolean
     external fun setButton(id: Int, pressed: Boolean)
     external fun reset()
     external fun unload()
