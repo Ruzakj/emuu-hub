@@ -13,6 +13,7 @@ object NativeBridge {
     external fun saveState(path: String): Boolean
     external fun loadState(path: String): Boolean
     external fun setButton(id: Int, pressed: Boolean)
+    external fun setAnalog(x: Int, y: Int)
     external fun reset()
     external fun unload()
 }
