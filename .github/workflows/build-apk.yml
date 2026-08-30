@@ -50,8 +50,27 @@ jobs:
           test -n "$CORE"
           cp "$CORE" app/src/main/jniLibs/arm64-v8a/libmgba_core.so
 
-      - name: Verify mGBA core
-        run: test -s app/src/main/jniLibs/arm64-v8a/libmgba_core.so
+      - name: Restore cached FCEUmm core
+        id: fceumm-cache
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/jniLibs/arm64-v8a/libfceumm_core.so
+          key: fceumm-arm64-libretro-v1
+
+      - name: Download FCEUmm ARM64 core on cache miss
+        if: steps.fceumm-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a /tmp/fceumm
+          curl --retry 3 --retry-delay 2 -fL "https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/fceumm_libretro_android.so.zip" -o /tmp/fceumm.zip
+          unzip -q /tmp/fceumm.zip -d /tmp/fceumm
+          CORE=$(find /tmp/fceumm -type f -name '*.so' | head -n 1)
+          test -n "$CORE"
+          cp "$CORE" app/src/main/jniLibs/arm64-v8a/libfceumm_core.so
+
+      - name: Verify bundled cores
+        run: |
+          test -s app/src/main/jniLibs/arm64-v8a/libmgba_core.so
+          test -s app/src/main/jniLibs/arm64-v8a/libfceumm_core.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -64,12 +83,12 @@ jobs:
 
       - name: Verify embedded native cores
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/arm64-v8a/(libemuhost|libmgba_core)\.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/arm64-v8a/(libemuhost|libmgba_core|libfceumm_core)\.so'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EmuHub-mGBA-debug
+          name: EmuHub-mGBA-NES-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           compression-level: 0
           if-no-files-found: error
