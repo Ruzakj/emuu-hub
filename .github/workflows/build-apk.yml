@@ -54,6 +54,13 @@ jobs:
           test -d third_party/ppsspp/assets
           rm -f app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
 
+      - name: Stage PPSSPP protobuf sources
+        run: |
+          rm -rf ppssppEmbedded/src/main/proto
+          mkdir -p ppssppEmbedded/src/main/proto
+          cp -a third_party/ppsspp/android/src/main/proto/. ppssppEmbedded/src/main/proto/
+          test -n "$(find ppssppEmbedded/src/main/proto -type f -name '*.proto' | head -n 1)"
+
       - name: Restore cached mGBA core
         id: mgba-cache
         uses: actions/cache@v4
