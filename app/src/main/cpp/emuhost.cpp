@@ -19,6 +19,10 @@ struct retro_system_av_info { retro_game_geometry geometry; retro_system_timing 
 enum { RETRO_PIXEL_FORMAT_0RGB1555 = 0, RETRO_PIXEL_FORMAT_XRGB8888 = 1, RETRO_PIXEL_FORMAT_RGB565 = 2 };
 enum { ENV_GET_CAN_DUPE = 3, ENV_GET_SYSTEM_DIRECTORY = 9, ENV_SET_PIXEL_FORMAT = 10, ENV_SET_INPUT_DESCRIPTORS = 11, ENV_GET_VARIABLE = 15, ENV_SET_VARIABLES = 16, ENV_GET_VARIABLE_UPDATE = 17, ENV_SET_SUPPORT_NO_GAME = 18, ENV_GET_SAVE_DIRECTORY = 31, ENV_GET_LANGUAGE = 39 };
 
+enum { RETRO_DEVICE_JOYPAD = 1, RETRO_DEVICE_ANALOG = 5 };
+enum { RETRO_DEVICE_INDEX_ANALOG_LEFT = 0 };
+enum { RETRO_DEVICE_ID_ANALOG_X = 0, RETRO_DEVICE_ID_ANALOG_Y = 1 };
+
 using retro_environment_t = bool(*)(unsigned, void*);
 using retro_video_refresh_t = void(*)(const void*, unsigned, unsigned, size_t);
 using retro_audio_sample_t = void(*)(int16_t, int16_t);
@@ -34,6 +38,8 @@ static int sampleRate = 44100;
 static std::vector<uint32_t> frame;
 static std::vector<int16_t> audioBuffer;
 static bool buttons[16] = {};
+static int16_t analogX = 0;
+static int16_t analogY = 0;
 
 static void (*p_retro_init)() = nullptr;
 static void (*p_retro_deinit)() = nullptr;
@@ -107,8 +113,13 @@ static size_t audioBatchCb(const int16_t* data, size_t frames) {
 }
 static void inputPollCb() {}
 static int16_t inputStateCb(unsigned port, unsigned device, unsigned index, unsigned id) {
-    if (port != 0 || device != 1 || index != 0 || id >= 16) return 0;
-    return buttons[id] ? 1 : 0;
+    if (port != 0) return 0;
+    if (device == RETRO_DEVICE_JOYPAD && index == 0 && id < 16) return buttons[id] ? 1 : 0;
+    if (device == RETRO_DEVICE_ANALOG && index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
+        if (id == RETRO_DEVICE_ID_ANALOG_X) return analogX;
+        if (id == RETRO_DEVICE_ID_ANALOG_Y) return analogY;
+    }
+    return 0;
 }
 
 template<typename T> static bool sym(T& out, const char* name) {
@@ -207,9 +218,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_load
     return p_retro_unserialize(state.data(), state.size()) ? JNI_TRUE : JNI_FALSE;
 }
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setButton(JNIEnv*, jobject, jint id, jboolean pressed) { if (id >= 0 && id < 16) buttons[id] = pressed; }
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setAnalog(JNIEnv*, jobject, jint x, jint y) {
+    analogX = static_cast<int16_t>(std::max(-32767, std::min(32767, static_cast<int>(x))));
+    analogY = static_cast<int16_t>(std::max(-32767, std::min(32767, static_cast<int>(y))));
+}
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_reset(JNIEnv*, jobject) { if (p_retro_reset) p_retro_reset(); }
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*, jobject) {
     if (p_retro_unload_game) p_retro_unload_game();
     if (p_retro_deinit) p_retro_deinit();
     if (core) dlclose(core); core = nullptr; frame.clear(); audioBuffer.clear();
+    std::fill(std::begin(buttons), std::end(buttons), false); analogX = analogY = 0;
 }
