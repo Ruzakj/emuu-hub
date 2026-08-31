@@ -126,6 +126,8 @@ jobs:
             'lib/arm64-v8a/libemucore_4k.so' \
             'lib/arm64-v8a/liblibrashader_capi.so' \
             'lib/arm64-v8a/libc++_shared.so' \
+            'lib/arm64-v8a/libshaderc_shared.so' \
+            'lib/arm64-v8a/libSPIRV-Tools-shared.so' \
             -d app/src/main/jniLibs/arm64-v8a
           rm -rf /tmp/armsx2-assets app/src/main/assets/ARMSX2
           mkdir -p /tmp/armsx2-assets app/src/main/assets/ARMSX2
@@ -134,6 +136,8 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
+          test -s app/src/main/jniLibs/arm64-v8a/libshaderc_shared.so
+          test -s app/src/main/jniLibs/arm64-v8a/libSPIRV-Tools-shared.so
           test -s app/src/main/assets/ARMSX2/GameIndex.yaml
 
       - name: Verify emulator cores
@@ -146,6 +150,8 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
+          test -s app/src/main/jniLibs/arm64-v8a/libshaderc_shared.so
+          test -s app/src/main/jniLibs/arm64-v8a/libSPIRV-Tools-shared.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -164,6 +170,8 @@ jobs:
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/liblibrashader_capi.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libc++_shared.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libshaderc_shared.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libSPIRV-Tools-shared.so'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libppsspp_jni.so'
 
       - name: Upload APK
