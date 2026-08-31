@@ -34,10 +34,6 @@ jobs:
         run: |
           set -euxo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          # Android 37 is not published by sdkmanager on this runner yet. The PS2
-          # runtime does not require API-37-only Java APIs, so build our embedded
-          # runtime against the newest platform available here and patch the
-          # upstream app module to match after checkout.
           sdkmanager "platforms;android-35" "platforms;android-36" "ndk;28.2.13676358" "cmake;3.31.6"
           test -d "$ANDROID_SDK_ROOT/platforms/android-36"
           test -d "$ANDROID_SDK_ROOT/ndk/28.2.13676358"
@@ -83,24 +79,27 @@ jobs:
         working-directory: /tmp/armsx2/platforms/android
         run: python3 app/src/main/cpp/3rdparty/shaderc/utils/git-sync-deps
 
-      - name: Build lean ARMSX2 Android release
+      - name: Build lean ARMSX2 native runtime only
         working-directory: /tmp/armsx2/platforms/android
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g
-        run: ./gradlew :app:assembleGithubRelease --stacktrace --no-daemon
+        run: ./gradlew :app:mergeGithubReleaseNativeLibs --stacktrace --no-daemon
 
-      - name: Collect complete lean runtime
+      - name: Collect and verify lean runtime
         run: |
           set -euxo pipefail
-          APK=$(find /tmp/armsx2/platforms/android/app/build/outputs/apk -type f -name '*.apk' | head -1)
-          test -n "$APK"
-          rm -rf /tmp/armsx2-runtime /tmp/armsx2-assets /tmp/armsx2-libs
-          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2 /tmp/armsx2-assets /tmp/armsx2-libs
+          rm -rf /tmp/armsx2-runtime
+          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2
 
-          unzip -q "$APK" 'lib/arm64-v8a/*.so' -d /tmp/armsx2-libs
-          cp -a /tmp/armsx2-libs/lib/arm64-v8a/. /tmp/armsx2-runtime/jniLibs/arm64-v8a/
-          unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
-          cp -a /tmp/armsx2-assets/assets/resources/. /tmp/armsx2-runtime/assets/ARMSX2/
+          CORE=$(find /tmp/armsx2/platforms/android/app/build/intermediates/merged_native_libs -type f -name 'libemucore_4k.so' | head -1)
+          test -n "$CORE"
+          LIBDIR=$(dirname "$CORE")
+          cp -a "$LIBDIR"/. /tmp/armsx2-runtime/jniLibs/arm64-v8a/
+
+          GAME_INDEX=$(find /tmp/armsx2 -type f -path '*/resources/GameIndex.yaml' | head -1)
+          test -n "$GAME_INDEX"
+          RESOURCE_DIR=$(dirname "$GAME_INDEX")
+          cp -a "$RESOURCE_DIR"/. /tmp/armsx2-runtime/assets/ARMSX2/
           cp /tmp/armsx2-source-sha.txt /tmp/armsx2-runtime/SOURCE_SHA.txt
 
           CORE=/tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so
@@ -113,21 +112,16 @@ jobs:
             echo 'ERROR: lean core still depends on librashader' >&2
             exit 1
           fi
-          echo 'Lean runtime files:'
+
+          echo '=== packaged native libraries ==='
           find /tmp/armsx2-runtime/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
+          echo '=== source ==='
+          cat /tmp/armsx2-runtime/SOURCE_SHA.txt
 
       - name: Upload Emu Hub PS2 runtime bundle
         uses: actions/upload-artifact@v4
         with:
           name: ARMSX2-Android-ARM64-Runtime
           path: /tmp/armsx2-runtime/
-          compression-level: 0
-          if-no-files-found: error
-
-      - name: Upload reference APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ARMSX2-Android-Reference-APK
-          path: /tmp/armsx2/platforms/android/app/build/outputs/apk/**/*.apk
           compression-level: 0
           if-no-files-found: error
