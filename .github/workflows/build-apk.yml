@@ -110,34 +110,35 @@ jobs:
           cp -a /tmp/ppsspp-src/assets/. app/src/main/assets/PPSSPP/
           test -d app/src/main/assets/PPSSPP/lang
 
-      - name: Stage ARMSX2 Android PS2 runtime
+      - name: Stage complete ARMSX2 Android PS2 runtime
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
           RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-armsx2-android.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
           test -n "$RUN_ID"
-          rm -rf /tmp/armsx2-ref /tmp/armsx2-apk
-          mkdir -p /tmp/armsx2-ref /tmp/armsx2-apk app/src/main/jniLibs/arm64-v8a app/src/main/assets/ARMSX2
+          rm -rf /tmp/armsx2-ref /tmp/armsx2-all /tmp/armsx2-assets
+          mkdir -p /tmp/armsx2-ref /tmp/armsx2-all app/src/main/jniLibs/arm64-v8a app/src/main/assets/ARMSX2
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ARMSX2-Android-Reference-APK -D /tmp/armsx2-ref
           APK=$(find /tmp/armsx2-ref -type f -name '*.apk' | head -1)
           test -n "$APK"
-          unzip -j "$APK" \
-            'lib/arm64-v8a/libemucore_4k.so' \
-            'lib/arm64-v8a/liblibrashader_capi.so' \
-            'lib/arm64-v8a/libc++_shared.so' \
-            'lib/arm64-v8a/libshaderc_shared.so' \
-            'lib/arm64-v8a/libSPIRV-Tools-shared.so' \
-            -d app/src/main/jniLibs/arm64-v8a
-          rm -rf /tmp/armsx2-assets app/src/main/assets/ARMSX2
+
+          # Bundle the COMPLETE arm64 native set from the known-good upstream APK.
+          # before-native-load means Android dies while dlopen() resolves the core,
+          # so pruning this dependency set is no longer acceptable for diagnosis.
+          unzip -q "$APK" 'lib/arm64-v8a/*.so' -d /tmp/armsx2-all
+          cp -a /tmp/armsx2-all/lib/arm64-v8a/. app/src/main/jniLibs/arm64-v8a/
+
+          rm -rf app/src/main/assets/ARMSX2
           mkdir -p /tmp/armsx2-assets app/src/main/assets/ARMSX2
           unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
           cp -a /tmp/armsx2-assets/assets/resources/. app/src/main/assets/ARMSX2/
+
+          echo 'ARMSX2 native runtime staged:'
+          find app/src/main/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
-          test -s app/src/main/jniLibs/arm64-v8a/libshaderc_shared.so
-          test -s app/src/main/jniLibs/arm64-v8a/libSPIRV-Tools-shared.so
           test -s app/src/main/assets/ARMSX2/GameIndex.yaml
 
       - name: Verify emulator cores
@@ -150,8 +151,6 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
           test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
-          test -s app/src/main/jniLibs/arm64-v8a/libshaderc_shared.so
-          test -s app/src/main/jniLibs/arm64-v8a/libSPIRV-Tools-shared.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -170,8 +169,6 @@ jobs:
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/liblibrashader_capi.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libc++_shared.so'
-          unzip -l "$APK" | grep 'lib/arm64-v8a/libshaderc_shared.so'
-          unzip -l "$APK" | grep 'lib/arm64-v8a/libSPIRV-Tools-shared.so'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libppsspp_jni.so'
 
       - name: Upload APK
