@@ -1,15 +1,19 @@
 package com.ric.emuhub
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.system.Os
+import android.system.OsConstants
 import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -31,23 +35,27 @@ class Ps2BiosActivity : Activity() {
     }
     private lateinit var state:TextView
     private lateinit var crashState:TextView
+    private lateinit var nativeState:TextView
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun rounded(color:Int,radius:Int,stroke:Int?=null)=GradientDrawable().apply{setColor(color);cornerRadius=dp(radius).toFloat();if(stroke!=null)setStroke(dp(1),stroke)}
 
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK
-        val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;setPadding(dp(24),dp(34),dp(24),dp(30));setBackgroundColor(Color.BLACK)}
+        val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;setPadding(dp(24),dp(24),dp(24),dp(24));setBackgroundColor(Color.BLACK)}
         root.addView(TextView(this).apply{text="PS2 BIOS DIAGNOSTIC";textSize=25f;setTextColor(Color.WHITE);setTypeface(typeface,Typeface.BOLD)})
-        root.addView(TextView(this).apply{text="Sekarang fokusnya bukan ganti-ganti BIOS lagi. Menu ini menyimpan tahap native terakhir dari proses PS2 terpisah.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12)})
+        root.addView(TextView(this).apply{text="Tidak tebak BIOS lagi. Halaman ini sekarang baca page-size, core yang dipilih, dan alasan proses :ps2 mati dari Android.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
 
-        state=TextView(this).apply{textSize=13f;gravity=Gravity.CENTER;setPadding(dp(16),dp(16),dp(16),dp(16));background=rounded(0xFF0A0A0A.toInt(),18,0xFF252525.toInt())}
-        root.addView(state,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(24)})
+        state=TextView(this).apply{textSize=13f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF0A0A0A.toInt(),18,0xFF252525.toInt())}
+        root.addView(state,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(18)})
 
-        crashState=TextView(this).apply{textSize=13f;gravity=Gravity.CENTER;setPadding(dp(16),dp(16),dp(16),dp(16));background=rounded(0xFF120808.toInt(),18,0xFF402020.toInt())}
+        nativeState=TextView(this).apply{textSize=12f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF071019.toInt(),18,0xFF17344A.toInt())}
+        root.addView(nativeState,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
+
+        crashState=TextView(this).apply{textSize=12f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF120808.toInt(),18,0xFF402020.toInt())}
         root.addView(crashState,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
 
-        root.addView(Button(this).apply{text="PILIH / GANTI BIOS";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF151515.toInt(),16,0xFF303030.toInt());setOnClickListener{chooseBios()}},LinearLayout.LayoutParams(-1,dp(56)).apply{topMargin=dp(18)})
-        root.addView(Button(this).apply{text="BOOT BIOS ONLY • ONE TEST";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF202020.toInt(),16,0xFF404040.toInt());setOnClickListener{bootBiosOnly()}},LinearLayout.LayoutParams(-1,dp(56)).apply{topMargin=dp(10)})
-        root.addView(Button(this).apply{text="SELESAI";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF0D0D0D.toInt(),16,0xFF252525.toInt());setOnClickListener{finish()}},LinearLayout.LayoutParams(-1,dp(52)).apply{topMargin=dp(10)})
+        root.addView(Button(this).apply{text="PILIH / GANTI BIOS";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF151515.toInt(),16,0xFF303030.toInt());setOnClickListener{chooseBios()}},LinearLayout.LayoutParams(-1,dp(52)).apply{topMargin=dp(14)})
+        root.addView(Button(this).apply{text="BOOT BIOS ONLY • ONE TEST";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF202020.toInt(),16,0xFF404040.toInt());setOnClickListener{bootBiosOnly()}},LinearLayout.LayoutParams(-1,dp(52)).apply{topMargin=dp(8)})
+        root.addView(Button(this).apply{text="SELESAI";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF0D0D0D.toInt(),16,0xFF252525.toInt());setOnClickListener{finish()}},LinearLayout.LayoutParams(-1,dp(48)).apply{topMargin=dp(8)})
         setContentView(root);refreshState()
     }
 
@@ -58,27 +66,48 @@ class Ps2BiosActivity : Activity() {
         if(b==null){state.text="BIOS BELUM VALID\nPilih dump BIOS PS2 4 MiB (disarankan).";state.setTextColor(0xFFBDBDBD.toInt())}
         else {val sha=runCatching{sha256(b)}.getOrDefault("?");val size=b.length();val verdict=if(size==4L*1024*1024)"4 MiB • ukuran retail normal" else "2 MiB • diterima untuk tes";state.text="BIOS READY\n${b.name}\n$verdict\nSHA-256\n$sha";state.setTextColor(0xFFE8E8E8.toInt())}
 
+        val pageSize=runCatching{Os.sysconf(OsConstants._SC_PAGESIZE)}.getOrDefault(4096L).let{if(it>0)it else 4096L}
+        val coreName=if(pageSize>=16384L)"libemucore_16k.so" else "libemucore_4k.so"
+        val nativeDir=applicationInfo.nativeLibraryDir?.let{File(it)}
+        val core=if(nativeDir!=null)File(nativeDir,coreName) else null
+        val fourK=if(nativeDir!=null)File(nativeDir,"libemucore_4k.so") else null
+        val sixteenK=if(nativeDir!=null)File(nativeDir,"libemucore_16k.so") else null
+        nativeState.text="NATIVE LOADER\nPAGE SIZE: $pageSize bytes\nSELECTED: $coreName\nSELECTED EXISTS: ${core?.isFile==true} • ${if(core?.isFile==true) core.length()/1024/1024 else 0} MiB\n4K CORE: ${fourK?.isFile==true} • 16K CORE: ${sixteenK?.isFile==true}"
+        nativeState.setTextColor(0xFFB9E2FF.toInt())
+
         var stage:String?=null
         var time=0L
         val traceFile=File(filesDir,"ps2/last_native_stage.txt")
-        if(traceFile.isFile){
-            val lines=runCatching{traceFile.readLines()}.getOrDefault(emptyList())
-            stage=lines.getOrNull(0)?.takeIf{it.isNotBlank()}
-            time=lines.getOrNull(1)?.toLongOrNull()?:0L
+        if(traceFile.isFile){val lines=runCatching{traceFile.readLines()}.getOrDefault(emptyList());stage=lines.getOrNull(0)?.takeIf{it.isNotBlank()};time=lines.getOrNull(1)?.toLongOrNull()?:0L}
+        if(stage.isNullOrBlank()){val trace=getSharedPreferences("ps2_runtime_trace",MODE_PRIVATE);stage=trace.getString("last_crash_stage",null);time=trace.getLong("last_crash_time",0L)}
+
+        val exit=latestPs2Exit()
+        val exitText=if(exit==null)"ANDROID EXIT: belum ada data" else {
+            val whenText=SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(exit.timestamp))
+            "ANDROID EXIT: ${reasonName(exit.reason)} (${exit.reason})\nSTATUS: ${exit.status} • $whenText\nDESC: ${exit.description ?: "-"}"
         }
-        if(stage.isNullOrBlank()){
-            val trace=getSharedPreferences("ps2_runtime_trace",MODE_PRIVATE)
-            stage=trace.getString("last_crash_stage",null)
-            time=trace.getLong("last_crash_time",0L)
-        }
-        if(stage.isNullOrBlank()){
-            crashState.text="LAST NATIVE STAGE\nBelum ada data tersimpan."
-            crashState.setTextColor(0xFF9A9A9A.toInt())
-        }else{
-            val whenText=if(time>0L) SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(time)) else "-"
-            crashState.text="LAST NATIVE STAGE\n$stage\n$whenText\n\nKalau FC, stage ini adalah titik terakhir yang lolos."
-            crashState.setTextColor(0xFFFFB4B4.toInt())
-        }
+        if(stage.isNullOrBlank()){crashState.text="LAST NATIVE STAGE\nBelum ada data tersimpan.\n\n$exitText";crashState.setTextColor(0xFF9A9A9A.toInt())}
+        else {val whenText=if(time>0L)SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(time)) else "-";crashState.text="LAST NATIVE STAGE\n$stage\n$whenText\n\n$exitText";crashState.setTextColor(0xFFFFB4B4.toInt())}
+    }
+
+    private fun latestPs2Exit():ApplicationExitInfo?{
+        if(Build.VERSION.SDK_INT<30)return null
+        return runCatching{
+            val am=getSystemService(ActivityManager::class.java)
+            am.getHistoricalProcessExitReasons(packageName,0,12).firstOrNull{it.processName=="$packageName:ps2"}
+        }.getOrNull()
+    }
+
+    private fun reasonName(reason:Int)=when(reason){
+        ApplicationExitInfo.REASON_CRASH_NATIVE->"CRASH_NATIVE"
+        ApplicationExitInfo.REASON_CRASH->"CRASH_JAVA"
+        ApplicationExitInfo.REASON_ANR->"ANR"
+        ApplicationExitInfo.REASON_SIGNALED->"SIGNALED"
+        ApplicationExitInfo.REASON_LOW_MEMORY->"LOW_MEMORY"
+        ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE->"RESOURCE_USAGE"
+        ApplicationExitInfo.REASON_USER_REQUESTED->"USER_REQUESTED"
+        ApplicationExitInfo.REASON_USER_STOPPED->"USER_STOPPED"
+        else->"REASON_$reason"
     }
 
     private fun bootBiosOnly(){if(selectedBios(this)==null){Toast.makeText(this,"Pilih BIOS valid dulu.",Toast.LENGTH_LONG).show();return};startActivity(Intent(this,Ps2GameActivity::class.java).putExtra(Ps2GameActivity.EXTRA_BIOS_ONLY,true))}
