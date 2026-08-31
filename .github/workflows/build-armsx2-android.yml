@@ -53,23 +53,38 @@ jobs:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g
         run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      - name: Collect Android ARM64 native engine
+      - name: Collect Emu Hub PS2 runtime bundle
         run: |
           set -euxo pipefail
           APK=$(find /tmp/armsx2/platforms/android/app/build/outputs/apk -type f -name '*.apk' | head -1)
           test -n "$APK"
-          mkdir -p /tmp/armsx2-native
-          unzip -j "$APK" 'lib/arm64-v8a/libemucore*.so' -d /tmp/armsx2-native
-          cp /tmp/armsx2-source-sha.txt /tmp/armsx2-native/SOURCE_SHA.txt
-          test -n "$(find /tmp/armsx2-native -type f -name 'libemucore*.so' -print -quit)"
-          file /tmp/armsx2-native/libemucore*.so
-          ls -lh /tmp/armsx2-native
+          rm -rf /tmp/armsx2-runtime
+          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2
 
-      - name: Upload Android native engine
+          unzip -j "$APK" \
+            'lib/arm64-v8a/libemucore_4k.so' \
+            'lib/arm64-v8a/liblibrashader_capi.so' \
+            'lib/arm64-v8a/libc++_shared.so' \
+            -d /tmp/armsx2-runtime/jniLibs/arm64-v8a
+
+          unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
+          cp -a /tmp/armsx2-assets/assets/resources/. /tmp/armsx2-runtime/assets/ARMSX2/
+          cp /tmp/armsx2-source-sha.txt /tmp/armsx2-runtime/SOURCE_SHA.txt
+
+          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so
+          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/liblibrashader_capi.so
+          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/libc++_shared.so
+          test -s /tmp/armsx2-runtime/assets/ARMSX2/GameIndex.yaml
+
+          echo 'Native dependencies:'
+          readelf -d /tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so | grep NEEDED || true
+          du -sh /tmp/armsx2-runtime
+
+      - name: Upload Emu Hub PS2 runtime bundle
         uses: actions/upload-artifact@v4
         with:
-          name: ARMSX2-Android-ARM64-Native
-          path: /tmp/armsx2-native/
+          name: ARMSX2-Android-ARM64-Runtime
+          path: /tmp/armsx2-runtime/
           compression-level: 0
           if-no-files-found: error
 
