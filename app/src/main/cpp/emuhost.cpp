@@ -163,7 +163,7 @@ static bool createHw(retro_hw_render_callback* cb){
     if(!makeHwCurrent()){ LOGE("eglMakeCurrent failed: 0x%x",eglGetError()); destroyHw(); return false; }
     glViewport(0,0,1024,1024); glClearColor(0,0,0,1); glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT); glFinish();
     releaseHwCurrent();
-    LOGI("Z9x HW context registered: GLES %u.%u reset deferred",major,cb->version_minor);
+    LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);
     return true;
 }
 
@@ -232,12 +232,12 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init
     opt(p_retro_set_controller_port_device,"retro_set_controller_port_device");opt(p_retro_serialize_size,"retro_serialize_size");opt(p_retro_serialize,"retro_serialize");opt(p_retro_unserialize,"retro_unserialize");
     p_retro_set_environment(envCb);p_retro_set_video_refresh(videoCb);p_retro_set_audio_sample(audioCb);p_retro_set_audio_sample_batch(audioBatchCb);p_retro_set_input_poll(inputPollCb);p_retro_set_input_state(inputStateCb);
     p_retro_init();
-    if(hwEnabled){
+    // Most hardware cores, including PPSSPP, request SET_HW_RENDER later from
+    // retro_load_game(). Only reset here if a core requested it during init.
+    if(hwEnabled&&hwContextReset&&!hwResetCalled){
         if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}
-        if(hwContextReset&&!hwResetCalled){hwContextReset();hwResetCalled=true;}
-        glViewport(0,0,1024,1024);glFinish();
-        releaseHwCurrent();
-        LOGI("Z9x EGL ownership released after context_reset");
+        hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();
+        LOGI("HW context_reset completed after retro_init");
     }
     if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
     LOGI("Core initialized: ppsspp=%d hw=%d reset=%d",isPpsspp?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
@@ -245,16 +245,33 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init
 
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setControllerDevice(JNIEnv*,jobject,jint device){if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,device==RETRO_DEVICE_ANALOG?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);}
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){
-    if(hwEnabled&&!makeHwCurrent()){LOGE("HW context not current before load_game");return JNI_FALSE;}
     const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};bool ok=p_retro_load_game&&p_retro_load_game(&info);e->ReleaseStringUTFChars(path,p);
-    if(ok&&p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0);}
-    if(hwEnabled){glFinish();releaseHwCurrent();LOGI("Z9x EGL ownership handed off to frame thread");}
-    return ok?JNI_TRUE:JNI_FALSE;
+    if(!ok){LOGE("retro_load_game failed");if(hwEnabled)releaseHwCurrent();return JNI_FALSE;}
+
+    // PPSSPP requests SET_HW_RENDER from inside retro_load_game(). At this point
+    // createHw() has produced the EGL context and installed the frontend callbacks.
+    // The core must receive context_reset exactly once before its first retro_run().
+    if(hwEnabled&&!hwResetCalled){
+        if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}
+        if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}
+        LOGI("Calling PPSSPP context_reset after retro_load_game");
+        hwContextReset();
+        hwResetCalled=true;
+        glViewport(0,0,1024,1024);glFinish();
+        LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");
+    }
+
+    if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d reset=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0,hwResetCalled?1:0);}
+    if(hwEnabled)releaseHwCurrent();
+    return JNI_TRUE;
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_runFrame(JNIEnv*e,jobject,jintArray p){
     if(shutdownRequested)return -2;
     if(!p_retro_run)return -1;
-    if(hwEnabled&&!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}
+    if(hwEnabled){
+        if(!hwResetCalled){LOGE("Blocked retro_run: HW context was never reset");return -4;}
+        if(!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}
+    }
     p_retro_run();
     if(shutdownRequested)return -2;
     jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,(jsize)c,(const jint*)frame.data());return(jint)c;
