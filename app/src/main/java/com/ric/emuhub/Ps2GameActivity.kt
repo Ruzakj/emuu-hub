@@ -15,16 +15,19 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import kr.co.iefriends.pcsx2.NativeApp
+import org.libsdl.app.SDL
+import org.libsdl.app.SDLControllerManager
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Minimal ARMSX2 host. BIOS-only boot intentionally follows upstream's default renderer path. */
+/** Minimal ARMSX2 host. Supports BIOS-only boot to isolate firmware/runtime from disc boot. */
 class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     companion object {
         const val EXTRA_BIOS_ONLY = "biosOnly"
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
+        private val sdlReady = AtomicBoolean(false)
     }
 
     private lateinit var surface: SurfaceView
@@ -59,17 +62,12 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
         romPath = intent.getStringExtra("romPath").orEmpty()
         if (!biosOnly && (romPath.isBlank() || !File(romPath).isFile)) {
-            trace("rom-missing", false)
-            Toast.makeText(this, "PS2 ROM tidak ditemukan.", Toast.LENGTH_LONG).show()
-            finish(); return
+            trace("rom-missing", false); Toast.makeText(this, "PS2 ROM tidak ditemukan.", Toast.LENGTH_LONG).show(); finish(); return
         }
         if (Ps2BiosActivity.selectedBios(this) == null) {
-            trace("bios-missing", false)
-            Toast.makeText(this, "Pilih BIOS PS2 dulu.", Toast.LENGTH_LONG).show()
-            finish(); return
+            trace("bios-missing", false); Toast.makeText(this, "Pilih BIOS PS2 dulu.", Toast.LENGTH_LONG).show(); finish(); return
         }
-        buildMinimalUi()
-        prepareRuntime()
+        buildMinimalUi(); prepareRuntime()
     }
 
     private fun buildMinimalUi() {
@@ -78,128 +76,58 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         status = TextView(this).apply {
             text = if (biosOnly) "PS2 • BIOS-only boot" else "PS2 • first-frame boot"
-            textSize = 11f
-            setTextColor(0xFFD0D0D0.toInt())
-            setBackgroundColor(0x99000000.toInt())
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            textSize = 11f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x99000000.toInt()); setPadding(dp(10),dp(6),dp(10),dp(6))
         }
-        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
-        root.addView(Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setOnClickListener { finish() } }, FrameLayout.LayoutParams(dp(70), dp(42), Gravity.TOP or Gravity.END).apply { topMargin = dp(10); rightMargin = dp(12) })
+        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=dp(10)})
+        root.addView(Button(this).apply{text="EXIT";textSize=10f;isAllCaps=false;setOnClickListener{finish()}},FrameLayout.LayoutParams(dp(70),dp(42),Gravity.TOP or Gravity.END).apply{topMargin=dp(10);rightMargin=dp(12)})
         setContentView(root)
     }
 
     private fun prepareRuntime() {
-        Thread({
-            try {
-                trace("preparing-resources")
-                val dataRoot = File(filesDir, "ps2").apply { mkdirs() }
-                val resourcesDir = File(dataRoot, "resources")
-                // Refresh the runtime resources on every PS2 launch. ARMSX2 ships shader/game-db
-                // fixes inside the APK and stale files from an older build can crash GS startup.
-                copyAssetTree("ARMSX2", resourcesDir, overwrite = true)
-                val biosDir = Ps2BiosActivity.biosDir(this)
-                trace("resources-ready")
-                runOnUiThread { initializeCore(dataRoot, biosDir) }
-            } catch (t: Throwable) {
-                trace("prepare-error:${t.javaClass.simpleName}", false)
-                runOnUiThread { Toast.makeText(this, "PS2 runtime gagal: ${t.message}", Toast.LENGTH_LONG).show(); finish() }
-            }
-        }, "ps2-prepare").start()
+        Thread({ try {
+            trace("preparing-resources")
+            val dataRoot=File(filesDir,"ps2").apply{mkdirs()}; val resourcesDir=File(dataRoot,"resources")
+            // Always refresh ARMSX2 resources. An old shader/GameDB copy can survive an APK update.
+            resourcesDir.deleteRecursively(); copyAssetTree("ARMSX2",resourcesDir)
+            val biosDir=Ps2BiosActivity.biosDir(this)
+            trace("resources-ready"); runOnUiThread{initializeCore(dataRoot,biosDir)}
+        } catch(t:Throwable){trace("prepare-error:${t.javaClass.simpleName}",false);runOnUiThread{Toast.makeText(this,"PS2 runtime gagal: ${t.message}",Toast.LENGTH_LONG).show();finish()}}},"ps2-prepare").start()
     }
 
-    private fun copyAssetTree(assetPath: String, target: File, overwrite: Boolean) {
-        val children = assets.list(assetPath).orEmpty()
-        if (children.isEmpty()) {
-            target.parentFile?.mkdirs()
-            if (overwrite || !target.isFile) assets.open(assetPath).use { input -> target.outputStream().use { input.copyTo(it) } }
-            return
-        }
-        target.mkdirs()
-        children.forEach { copyAssetTree("$assetPath/$it", File(target, it), overwrite) }
+    private fun copyAssetTree(assetPath:String,target:File){val children=assets.list(assetPath).orEmpty();if(children.isEmpty()){target.parentFile?.mkdirs();assets.open(assetPath).use{i->target.outputStream().use{i.copyTo(it)}};return};target.mkdirs();children.forEach{copyAssetTree("$assetPath/$it",File(target,it))}}
+
+    private fun initializeSdlBridge() {
+        if (sdlReady.get()) return
+        trace("before-sdl-setup")
+        // ARMSX2's own Android host performs these calls before any VM thread starts.
+        // The native core uses SDL's Android JNI environment for filesystem/input helpers.
+        SDL.setContext(this)
+        SDLControllerManager.nativeSetupJNI()
+        SDLControllerManager.initialize()
+        sdlReady.set(true)
+        trace("after-sdl-setup")
     }
 
-    private fun initializeCore(dataRoot: File, biosDir: File) {
-        if (initialized || isFinishing) return
-        try {
-            trace("before-native-load")
-            NativeApp.attachContext(this)
-            if (!NativeApp.isNativeReady()) error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+    private fun initializeCore(dataRoot:File,biosDir:File){if(initialized||isFinishing)return;try{
+        trace("before-native-load");NativeApp.attachContext(this);if(!NativeApp.isNativeReady())error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+        initializeSdlBridge()
+        status.text="PS2 • initialize";trace(if(biosOnly)"bios-only-before-initialize" else "before-initialize");NativeApp.initialize(dataRoot.absolutePath,biosDir.absolutePath,Build.VERSION.SDK_INT);trace(if(biosOnly)"bios-only-after-initialize" else "after-initialize")
+        // Match upstream Android bootstrap: leave renderer at Auto/default until VM creation.
+        trace("renderer-auto-default")
+        initialized=true;attachNativeSurfaceIfReady();maybeStartVm()
+    }catch(t:Throwable){trace("init-error:${t.javaClass.simpleName}",false);Toast.makeText(this,"ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}",Toast.LENGTH_LONG).show();finish()}}
 
-            status.text = "PS2 • initialize"
-            trace(if (biosOnly) "bios-only-before-initialize" else "before-initialize")
-            NativeApp.initialize(dataRoot.absolutePath, biosDir.absolutePath, Build.VERSION.SDK_INT)
-            trace(if (biosOnly) "bios-only-after-initialize" else "after-initialize")
+    private fun attachNativeSurfaceIfReady(){if(!initialized||!surfaceReady||nativeSurfaceAttached)return;val h=surface.holder;val w=if(surfaceWidth>0)surfaceWidth else surface.width;val ht=if(surfaceHeight>0)surfaceHeight else surface.height;if(!h.surface.isValid||w<=0||ht<=0)return;status.text="PS2 • attach surface";trace("before-surface-created");NativeApp.onNativeSurfaceCreated();trace("after-surface-created");trace("before-surface-changed");NativeApp.onNativeSurfaceChanged(h.surface,w,ht);trace("after-surface-changed");nativeSurfaceAttached=true}
 
-            // IMPORTANT: do not force renderVulkan() here. Current upstream ARMSX2 intentionally
-            // leaves GS renderer at Auto during initialization; on Android this selects the safe
-            // default renderer. Our previous forced-Vulkan call diverged from the reference app
-            // before VM creation and could kill BIOS-only boot before the first frame.
-            status.text = "PS2 • renderer auto"
-            trace("renderer-auto")
-            initialized = true
-            attachNativeSurfaceIfReady()
-            maybeStartVm()
-        } catch (t: Throwable) {
-            trace("init-error:${t.javaClass.simpleName}", false)
-            Toast.makeText(this, "ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-            finish()
-        }
+    private fun maybeStartVm(){if(!initialized||!surfaceReady||!nativeSurfaceAttached||!vmStarted.compareAndSet(false,true))return
+        status.text=if(biosOnly)"PS2 • boot BIOS" else "PS2 • booting VM";trace(if(biosOnly)"bios-only-before-run-vm" else "before-run-vm")
+        val bootPath=if(biosOnly)"" else romPath
+        vmThread=Thread({val result=runCatching{NativeApp.runVMThread(bootPath)};val ok=result.getOrDefault(false);trace(if(ok)"vm-returned-ok" else "vm-returned-false",false);runOnUiThread{if(!isFinishing&&!shuttingDown.get()){if(!ok)Toast.makeText(this,if(biosOnly)"BIOS-only boot gagal." else "PS2 gagal boot.",Toast.LENGTH_LONG).show();finish()}}},"armsx2-vm").also{it.start()}
     }
 
-    private fun attachNativeSurfaceIfReady() {
-        if (!initialized || !surfaceReady || nativeSurfaceAttached) return
-        val h = surface.holder
-        val w = if (surfaceWidth > 0) surfaceWidth else surface.width
-        val ht = if (surfaceHeight > 0) surfaceHeight else surface.height
-        if (!h.surface.isValid || w <= 0 || ht <= 0) return
-        status.text = "PS2 • attach surface"
-        trace("before-surface-created")
-        NativeApp.onNativeSurfaceCreated()
-        trace("after-surface-created")
-        trace("before-surface-changed")
-        NativeApp.onNativeSurfaceChanged(h.surface, w, ht)
-        trace("after-surface-changed")
-        nativeSurfaceAttached = true
-    }
-
-    private fun maybeStartVm() {
-        if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • booting VM"
-        trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
-        val bootPath = if (biosOnly) "" else romPath
-        vmThread = Thread({
-            val result = runCatching { NativeApp.runVMThread(bootPath) }
-            val ok = result.getOrDefault(false)
-            trace(if (ok) "vm-returned-ok" else "vm-returned-false", false)
-            runOnUiThread {
-                if (!isFinishing && !shuttingDown.get()) {
-                    if (!ok) Toast.makeText(this, if (biosOnly) "BIOS-only boot gagal." else "PS2 gagal boot.", Toast.LENGTH_LONG).show()
-                    finish()
-                }
-            }
-        }, "armsx2-vm").also { it.start() }
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder) { surfaceReady = true; if (initialized) runCatching { attachNativeSurfaceIfReady() }; maybeStartVm() }
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        surfaceReady = true; surfaceWidth = width; surfaceHeight = height
-        if (initialized) {
-            if (!nativeSurfaceAttached) runCatching { attachNativeSurfaceIfReady() }
-            else runCatching { NativeApp.onNativeSurfaceChanged(holder.surface, width, height) }
-        }
-        maybeStartVm()
-    }
-    override fun surfaceDestroyed(holder: SurfaceHolder) { surfaceReady = false; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false } }
-
-    private fun shutdownCore() {
-        if (!shuttingDown.compareAndSet(false, true)) return
-        if (initialized && vmStarted.get()) runCatching { NativeApp.shutdown() }
-        vmThread?.let { if (it.isAlive && it !== Thread.currentThread()) runCatching { it.join(1000) } }
-        if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false }
-        if (!vmStarted.get()) trace("closed-before-vm", false)
-    }
-
-    override fun finish() { shutdownCore(); super.finish() }
-    override fun onDestroy() { shutdownCore(); super.onDestroy() }
-    @Deprecated("Framework compatibility") override fun onBackPressed() { finish() }
+    override fun surfaceCreated(holder:SurfaceHolder){surfaceReady=true;if(initialized)runCatching{attachNativeSurfaceIfReady()};maybeStartVm()}
+    override fun surfaceChanged(holder:SurfaceHolder,format:Int,width:Int,height:Int){surfaceReady=true;surfaceWidth=width;surfaceHeight=height;if(initialized){if(!nativeSurfaceAttached)runCatching{attachNativeSurfaceIfReady()}else runCatching{NativeApp.onNativeSurfaceChanged(holder.surface,width,height)}};maybeStartVm()}
+    override fun surfaceDestroyed(holder:SurfaceHolder){surfaceReady=false;if(initialized&&nativeSurfaceAttached){runCatching{NativeApp.onNativeSurfaceDestroyed()};nativeSurfaceAttached=false}}
+    private fun shutdownCore(){if(!shuttingDown.compareAndSet(false,true))return;if(initialized&&vmStarted.get())runCatching{NativeApp.shutdown()};vmThread?.let{if(it.isAlive&&it!==Thread.currentThread())runCatching{it.join(1000)}};if(initialized&&nativeSurfaceAttached){runCatching{NativeApp.onNativeSurfaceDestroyed()};nativeSurfaceAttached=false};if(!vmStarted.get())trace("closed-before-vm",false)}
+    override fun finish(){shutdownCore();super.finish()};override fun onDestroy(){shutdownCore();super.onDestroy()};@Deprecated("Framework compatibility") override fun onBackPressed(){finish()}
 }
