@@ -122,19 +122,22 @@ class GameActivity : Activity() {
             "mgba" -> 16_742_706L
             "fceumm" -> 16_639_267L
             "snes9x" -> 16_639_267L
-            "pcsx" -> 16_666_667L
+            "pcsx" -> 16_683_350L
             else -> 16_666_667L
         }
 
         fun start(){
             val rate=NativeBridge.getSampleRate().coerceAtLeast(8000)
             val minBuffer=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
-            audioTrack=AudioTrack.Builder()
+            val latencySensitive = coreId=="ppsspp" || coreId=="pcsx"
+            val bufferBytes = if(latencySensitive) maxOf(minBuffer*2,rate*4/12) else maxOf(minBuffer*3,rate*4/8)
+            val builder=AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(maxOf(minBuffer*3,rate*4/8))
+                .setBufferSizeInBytes(bufferBytes)
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .build().also{it.play()}
+            if(latencySensitive && Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            audioTrack=builder.build().also{it.play()}
             if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame-Z9x").also{it.start()}
         }
 
@@ -208,7 +211,7 @@ class GameActivity : Activity() {
                 drainAudioNonBlocking()
                 nextFrame += framePeriodNs
                 val now=System.nanoTime()
-                var waitNs=nextFrame-now
+                val waitNs=nextFrame-now
                 if(waitNs>0){
                     LockSupport.parkNanos(waitNs)
                 }else if(waitNs < -framePeriodNs*3){
@@ -218,7 +221,7 @@ class GameActivity : Activity() {
         }
 
         override fun run(){
-            runCatching{Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)}
+            runCatching{Process.setThreadPriority(if(coreId=="ppsspp"||coreId=="pcsx") Process.THREAD_PRIORITY_URGENT_DISPLAY else Process.THREAD_PRIORITY_DISPLAY)}
             if(coreId=="ppsspp")runPpsspp() else runClassicCore()
         }
 
