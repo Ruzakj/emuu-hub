@@ -14,4 +14,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "EmuHub"
 include(":app")
-include(":ppssppEmbedded")
