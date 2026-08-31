@@ -12,33 +12,15 @@ import android.view.Surface;
 import java.io.File;
 import java.lang.ref.WeakReference;
 
-/** ARMSX2 JNI bridge. Native loading intentionally mirrors upstream ARMSX2. */
+/** ARMSX2 JNI bridge. Native loading is explicit so the host can isolate and diagnose dlopen. */
 public final class NativeApp {
     private NativeApp() {}
 
     private static WeakReference<Context> contextRef;
     private static volatile boolean paused;
+    private static volatile boolean loadAttempted;
     public static volatile boolean hasNoNativeBinary = true;
-    public static volatile String nativeLoadError = "";
-
-    static {
-        final String libraryName = selectNativeLibraryName();
-        try {
-            // IMPORTANT: upstream ARMSX2 loads ONLY emucore here. Android's dynamic linker
-            // resolves libc++, librashader, shaderc/SPIRV transitively. Explicitly preloading
-            // that dependency chain in Emu Hub was a divergence and the crash breadcrumb
-            // proves the process was dying while NativeApp itself was being initialized.
-            System.loadLibrary(libraryName);
-            hasNoNativeBinary = false;
-            nativeLoadError = "";
-        } catch (UnsatisfiedLinkError e) {
-            hasNoNativeBinary = true;
-            nativeLoadError = "UnsatisfiedLinkError: " + String.valueOf(e.getMessage());
-        } catch (Throwable t) {
-            hasNoNativeBinary = true;
-            nativeLoadError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
-        }
-    }
+    public static volatile String nativeLoadError = "not loaded";
 
     private static long getRuntimePageSize() {
         try {
@@ -51,6 +33,33 @@ public final class NativeApp {
 
     private static String selectNativeLibraryName() {
         return getRuntimePageSize() >= 16384 ? "emucore_16k" : "emucore_4k";
+    }
+
+    /**
+     * Load ARMSX2 on demand, after Ps2GameActivity is already running in its dedicated :ps2
+     * process. This prevents Emu Hub's NDK27/libretro C++ runtime from sharing a process with
+     * ARMSX2's NDK28 libc++_shared and removes class-initializer crashes from NativeApp itself.
+     */
+    public static synchronized boolean loadNative(Context context) {
+        attachContext(context);
+        if (loadAttempted) return !hasNoNativeBinary;
+        loadAttempted = true;
+        final String libraryName = selectNativeLibraryName();
+        try {
+            // Match upstream ARMSX2: load emucore directly and let Android resolve DT_NEEDED.
+            System.loadLibrary(libraryName);
+            hasNoNativeBinary = false;
+            nativeLoadError = "";
+            return true;
+        } catch (UnsatisfiedLinkError e) {
+            hasNoNativeBinary = true;
+            nativeLoadError = "UnsatisfiedLinkError: " + String.valueOf(e.getMessage());
+            return false;
+        } catch (Throwable t) {
+            hasNoNativeBinary = true;
+            nativeLoadError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
+            return false;
+        }
     }
 
     public static boolean isNativeReady() { return !hasNoNativeBinary; }
