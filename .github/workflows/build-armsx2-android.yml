@@ -32,31 +32,52 @@ jobs:
 
       - name: Install Android NDK and CMake
         run: |
+          set -euxo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "platforms;android-37" "ndk;28.2.13676358" "cmake;3.31.6"
+          # Android 37 is not published by sdkmanager on this runner yet. The PS2
+          # runtime does not require API-37-only Java APIs, so build our embedded
+          # runtime against the newest platform available here and patch the
+          # upstream app module to match after checkout.
+          sdkmanager "platforms;android-35" "platforms;android-36" "ndk;28.2.13676358" "cmake;3.31.6"
+          test -d "$ANDROID_SDK_ROOT/platforms/android-36"
+          test -d "$ANDROID_SDK_ROOT/ndk/28.2.13676358"
 
       - name: Checkout pinned ARMSX2 source
         run: |
           set -euxo pipefail
+          rm -rf /tmp/armsx2
           git clone https://github.com/ARMSX2/ARMSX2.git /tmp/armsx2
           git -C /tmp/armsx2 checkout 1024c3538ee2ff27fc0f9d5272d76202b8b1c03b
           git -C /tmp/armsx2 rev-parse HEAD | tee /tmp/armsx2-source-sha.txt
 
-      - name: Make core embeddable and remove librashader load-time dependency
+      - name: Patch ARMSX2 for Emu Hub embedding
         run: |
           set -euxo pipefail
-          CMAKE=/tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('/tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt')
-          s=p.read_text()
-          old='add_subdirectory(3rdparty/librashader)'
+
+          gradle = Path('/tmp/armsx2/platforms/android/app/build.gradle.kts')
+          g = gradle.read_text()
+          if 'compileSdk = 37' not in g or 'targetSdk = 37' not in g:
+              raise SystemExit('Expected ARMSX2 API 37 declarations were not found')
+          g = g.replace('compileSdk = 37', 'compileSdk = 36', 1)
+          g = g.replace('targetSdk = 37', 'targetSdk = 36', 1)
+          gradle.write_text(g)
+
+          cmake = Path('/tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt')
+          s = cmake.read_text()
+          old = 'add_subdirectory(3rdparty/librashader)'
           if old not in s:
               raise SystemExit('librashader hook not found')
-          s=s.replace(old, 'set(ARMSX2_HAVE_LIBRASHADER OFF)\nmessage(STATUS "Emu Hub lean build: librashader disabled")', 1)
-          p.write_text(s)
+          s = s.replace(
+              old,
+              'set(ARMSX2_HAVE_LIBRASHADER OFF)\nmessage(STATUS "Emu Hub lean build: librashader disabled")',
+              1,
+          )
+          cmake.write_text(s)
           PY
-          grep -n 'lean build: librashader disabled' "$CMAKE"
+          grep -n 'compileSdk = 36\|targetSdk = 36' /tmp/armsx2/platforms/android/app/build.gradle.kts
+          grep -n 'lean build: librashader disabled' /tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt
 
       - name: Fetch shaderc dependencies
         working-directory: /tmp/armsx2/platforms/android
@@ -73,8 +94,8 @@ jobs:
           set -euxo pipefail
           APK=$(find /tmp/armsx2/platforms/android/app/build/outputs/apk -type f -name '*.apk' | head -1)
           test -n "$APK"
-          rm -rf /tmp/armsx2-runtime /tmp/armsx2-assets
-          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2 /tmp/armsx2-assets
+          rm -rf /tmp/armsx2-runtime /tmp/armsx2-assets /tmp/armsx2-libs
+          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2 /tmp/armsx2-assets /tmp/armsx2-libs
 
           unzip -q "$APK" 'lib/arm64-v8a/*.so' -d /tmp/armsx2-libs
           cp -a /tmp/armsx2-libs/lib/arm64-v8a/. /tmp/armsx2-runtime/jniLibs/arm64-v8a/
