@@ -32,13 +32,17 @@ class GameActivity : Activity() {
     private var gameView: GameView? = null
     @Volatile private var fastForward = false
     private lateinit var stateFile: File
+    private lateinit var gameProfile: GameProfile
     private var cleanedUp = false
+
+    data class GameProfile(val id:String,val label:String,val audioBufferScale:Int,val priority:Int,val videoFilter:Boolean)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val rom = intent.getStringExtra("romPath") ?: run { finish(); return }
         val coreId = intent.getStringExtra("coreId") ?: "mgba"
         val romName = intent.getStringExtra("romName") ?: File(rom).name
+        gameProfile = resolveGameProfile(coreId, romName)
         val coreFile = when (coreId) {
             "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; else -> "libmgba_core.so"
         }
@@ -51,11 +55,22 @@ class GameActivity : Activity() {
         if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)
         if (!NativeBridge.loadGame(rom)) { showLoadError("$coreLabel gagal memuat ${File(rom).name}."); return }
         val root = FrameLayout(this).apply { setBackgroundColor(0xFF050507.toInt()) }
-        gameView = GameView(coreId).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        gameView = GameView(coreId, gameProfile).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         root.addView(buildGamepadOverlay(coreId), FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
         enableSafeFullscreen()
         gameView?.start()
+    }
+
+    private fun resolveGameProfile(coreId:String,romName:String):GameProfile{
+        val n=romName.lowercase()
+        return when{
+            coreId=="ppsspp" && ("god of war" in n || "gow" in n) -> GameProfile("psp-heavy","Z9x Heavy PSP",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            coreId=="pcsx" && ("final fantasy ix" in n || "final fantasy 9" in n || "ff9" in n) -> GameProfile("ps1-rpg","Z9x PS1 RPG",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            coreId=="ppsspp" -> GameProfile("psp-balanced","Z9x PSP Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            else -> GameProfile("classic","Classic",3,Process.THREAD_PRIORITY_DISPLAY,true)
+        }
     }
 
     private fun enableSafeFullscreen() {
@@ -65,19 +80,9 @@ class GameActivity : Activity() {
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) enableSafeFullscreen() }
-
-    @Deprecated("Framework compatibility")
-    override fun onBackPressed() { shutdownCore(); finish() }
-
-    private fun shutdownCore() {
-        if (cleanedUp) return
-        cleanedUp = true
-        gameView?.stop()
-        NativeBridge.setAnalog(0, 0)
-        NativeBridge.unload()
-    }
-
-    private fun showLoadError(message: String) { setContentView(TextView(this).apply { text=message; gravity=Gravity.CENTER; textSize=18f; setTextColor(0xFFFFFFFF.toInt()); setBackgroundColor(0xFF050507.toInt()); setPadding(dp(24),dp(24),dp(24),dp(24)) }) }
+    @Deprecated("Framework compatibility") override fun onBackPressed() { shutdownCore(); finish() }
+    private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload() }
+    private fun showLoadError(message:String){setContentView(TextView(this).apply{text=message;gravity=Gravity.CENTER;textSize=18f;setTextColor(0xFFFFFFFF.toInt());setBackgroundColor(0xFF050507.toInt());setPadding(dp(24),dp(24),dp(24),dp(24))})}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun translucentBackground(alpha:Int=120,stroke:Boolean=true,radiusDp:Int=18)=GradientDrawable().apply{shape=GradientDrawable.RECTANGLE;cornerRadius=dp(radiusDp).toFloat();setColor((alpha shl 24) or 0x00202024);if(stroke)setStroke(dp(1),0x55FFFFFF)}
     private fun roundBackground(alpha:Int=105)=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor((alpha shl 24) or 0x00202024);setStroke(dp(1),0x55FFFFFF)}
@@ -107,124 +112,24 @@ class GameActivity : Activity() {
     private fun safeStateKey(name:String)=MessageDigest.getInstance("SHA-256").digest(name.toByteArray()).take(8).joinToString(""){"%02x".format(it)}
     override fun onDestroy(){shutdownCore();super.onDestroy()}
 
-    inner class GameView(private val coreId:String):View(this@GameActivity),Runnable{
+    inner class GameView(private val coreId:String,private val profile:GameProfile):View(this@GameActivity),Runnable{
         private val running=AtomicBoolean(false)
-        private var frameW=NativeBridge.getWidth().coerceAtLeast(1)
-        private var frameH=NativeBridge.getHeight().coerceAtLeast(1)
+        private var frameW=NativeBridge.getWidth().coerceAtLeast(1);private var frameH=NativeBridge.getHeight().coerceAtLeast(1)
         private val pixels=IntArray(1024*1024)
         @Volatile private var bitmap=Bitmap.createBitmap(frameW,frameH,Bitmap.Config.ARGB_8888)
-        private val paint=Paint(Paint.FILTER_BITMAP_FLAG)
+        private val paint=Paint(if(profile.videoFilter) Paint.FILTER_BITMAP_FLAG else 0)
         private var thread:Thread?=null
-        private val audioScratch=ShortArray(16384)
-        private var audioTrack:AudioTrack?=null
+        private val audioScratch=ShortArray(16384);private var audioTrack:AudioTrack?=null
+        private val framePeriodNs:Long=when(coreId){"mgba"->16_742_706L;"fceumm","snes9x"->16_639_267L;"pcsx"->16_683_350L;else->16_666_667L}
 
-        private val framePeriodNs:Long = when(coreId){
-            "mgba" -> 16_742_706L
-            "fceumm" -> 16_639_267L
-            "snes9x" -> 16_639_267L
-            "pcsx" -> 16_683_350L
-            else -> 16_666_667L
-        }
-
-        fun start(){
-            val rate=NativeBridge.getSampleRate().coerceAtLeast(8000)
-            val minBuffer=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
-            val latencySensitive = coreId=="ppsspp" || coreId=="pcsx"
-            val bufferBytes = if(latencySensitive) maxOf(minBuffer*2,rate*4/12) else maxOf(minBuffer*3,rate*4/8)
-            val builder=AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(bufferBytes)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-            if(latencySensitive && Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-            audioTrack=builder.build().also{it.play()}
-            if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame-Z9x").also{it.start()}
-        }
-
+        fun start(){val rate=NativeBridge.getSampleRate().coerceAtLeast(8000);val minBuffer=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096);val latencySensitive=coreId=="ppsspp"||coreId=="pcsx";val bufferBytes=if(latencySensitive)maxOf(minBuffer*profile.audioBufferScale,rate*4/12)else maxOf(minBuffer*3,rate*4/8);val builder=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()).setBufferSizeInBytes(bufferBytes).setTransferMode(AudioTrack.MODE_STREAM);if(latencySensitive&&Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);audioTrack=builder.build().also{it.play()};if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame-Z9x-${profile.id}").also{it.start()}}
         fun onFastForwardChanged(enabled:Boolean){try{audioTrack?.pause();audioTrack?.flush();if(!enabled)audioTrack?.play()}catch(_:Exception){}}
-
-        fun stop(){
-            if(!running.getAndSet(false))return
-            try{audioTrack?.pause();audioTrack?.flush()}catch(_:Exception){}
-            thread?.interrupt()
-            try{thread?.join(1500)}catch(_:Exception){}
-            try{audioTrack?.stop()}catch(_:Exception){}
-            audioTrack?.release();audioTrack=null;thread=null
-        }
-
-        private fun updateVideo(){
-            val w=NativeBridge.getWidth().coerceIn(1,1024)
-            val h=NativeBridge.getHeight().coerceIn(1,1024)
-            if(w*h<=pixels.size){
-                if(w!=frameW||h!=frameH){frameW=w;frameH=h;bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)}
-                bitmap.setPixels(pixels,0,w,0,0,w,h)
-                postInvalidate()
-            }
-        }
-
-        private fun drainAudioNonBlocking(){
-            var count=NativeBridge.readAudio(audioScratch)
-            while(count>0&&running.get()){
-                var off=0
-                while(off<count&&running.get()){
-                    val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_NON_BLOCKING)?:-1
-                    if(z>0)off+=z else break
-                }
-                if(off<count)break
-                count=NativeBridge.readAudio(audioScratch)
-            }
-        }
-
-        private fun runPpsspp(){
-            while(running.get()){
-                val n=NativeBridge.runFrame(pixels)
-                if(n<0){running.set(false);break}
-                if(n>0)updateVideo()
-                if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};try{Thread.sleep(8)}catch(_:Exception){break}}
-                else{
-                    var count=NativeBridge.readAudio(audioScratch)
-                    while(count>0&&running.get()){
-                        var off=0
-                        while(off<count&&running.get()){
-                            val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1
-                            if(z>0)off+=z else break
-                        }
-                        count=NativeBridge.readAudio(audioScratch)
-                    }
-                }
-            }
-        }
-
-        private fun runClassicCore(){
-            var nextFrame=System.nanoTime()
-            while(running.get()){
-                val n=NativeBridge.runFrame(pixels)
-                if(n<0){running.set(false);break}
-                if(n>0)updateVideo()
-
-                if(fastForward){
-                    while(NativeBridge.readAudio(audioScratch)>0){}
-                    nextFrame=System.nanoTime()
-                    continue
-                }
-
-                drainAudioNonBlocking()
-                nextFrame += framePeriodNs
-                val now=System.nanoTime()
-                val waitNs=nextFrame-now
-                if(waitNs>0){
-                    LockSupport.parkNanos(waitNs)
-                }else if(waitNs < -framePeriodNs*3){
-                    nextFrame=now
-                }
-            }
-        }
-
-        override fun run(){
-            runCatching{Process.setThreadPriority(if(coreId=="ppsspp"||coreId=="pcsx") Process.THREAD_PRIORITY_URGENT_DISPLAY else Process.THREAD_PRIORITY_DISPLAY)}
-            if(coreId=="ppsspp")runPpsspp() else runClassicCore()
-        }
-
+        fun stop(){if(!running.getAndSet(false))return;try{audioTrack?.pause();audioTrack?.flush()}catch(_:Exception){};thread?.interrupt();try{thread?.join(1500)}catch(_:Exception){};try{audioTrack?.stop()}catch(_:Exception){};audioTrack?.release();audioTrack=null;thread=null}
+        private fun updateVideo(){val w=NativeBridge.getWidth().coerceIn(1,1024);val h=NativeBridge.getHeight().coerceIn(1,1024);if(w*h<=pixels.size){if(w!=frameW||h!=frameH){frameW=w;frameH=h;bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)};bitmap.setPixels(pixels,0,w,0,0,w,h);postInvalidate()}}
+        private fun drainAudioNonBlocking(){var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_NON_BLOCKING)?:-1;if(z>0)off+=z else break};if(off<count)break;count=NativeBridge.readAudio(audioScratch)}}
+        private fun runPpsspp(){while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};try{Thread.sleep(8)}catch(_:Exception){break}}else{var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)}}}}
+        private fun runClassicCore(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};drainAudioNonBlocking();nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*3)nextFrame=now}}
+        override fun run(){runCatching{Process.setThreadPriority(profile.priority)};if(coreId=="ppsspp")runPpsspp()else runClassicCore()}
         override fun onDraw(c:Canvas){super.onDraw(c);val w=frameW.coerceAtLeast(1);val h=frameH.coerceAtLeast(1);val scale=minOf(width.toFloat()/w,height.toFloat()/h);val dw=w*scale;val dh=h*scale;c.drawBitmap(bitmap,null,android.graphics.RectF((width-dw)/2f,(height-dh)/2f,(width+dw)/2f,(height+dh)/2f),paint)}
     }
 }
