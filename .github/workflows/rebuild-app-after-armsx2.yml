@@ -1,0 +1,20 @@
+name: Rebuild App After ARMSX2
+
+on:
+  workflow_run:
+    workflows: ["Build ARMSX2 Android Native"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rebuild:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger APK build with fresh ARMSX2 runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --repo "$GITHUB_REPOSITORY" --ref main
