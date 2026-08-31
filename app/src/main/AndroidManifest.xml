@@ -13,7 +13,11 @@
     </queries>
     <application android:name=".EmuHubApp" android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true">
         <activity android:name=".Ps2BiosActivity" android:screenOrientation="portrait" />
-        <activity android:name=".Ps2GameActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
+        <!-- ARMSX2 is built with a newer Android NDK/runtime than Emu Hub's libretro host.
+             Keep PS2 in its own app process so libc++_shared and other native globals cannot
+             collide with PPSSPP/PCSX/libemuhost already loaded in the main process. It is still
+             the same APK/app and uses the same private files, BIOS and assets. -->
+        <activity android:name=".Ps2GameActivity" android:process=":ps2" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
         <activity android:name=".GameActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
         <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:exported="true">
             <intent-filter>
