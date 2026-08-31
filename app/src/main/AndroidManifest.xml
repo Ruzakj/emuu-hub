@@ -11,7 +11,7 @@
             <data android:mimeType="application/octet-stream" />
         </intent>
     </queries>
-    <application android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true">
+    <application android:name=".EmuHubApp" android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true">
         <activity android:name=".Ps2BiosActivity" android:screenOrientation="portrait" />
         <activity android:name=".Ps2GameActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
         <activity android:name=".GameActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" />
