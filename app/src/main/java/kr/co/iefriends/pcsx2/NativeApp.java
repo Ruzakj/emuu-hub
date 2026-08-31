@@ -10,15 +10,28 @@ import android.view.Surface;
 import java.io.File;
 import java.lang.ref.WeakReference;
 
-/** Minimal ARMSX2 Android JNI bridge used by Emu Hub's internal PS2 activity. */
+/** Minimal ARMSX2 Android JNI bridge used by Emu Hub's dedicated PS2 activity. */
 public final class NativeApp {
     private NativeApp() {}
 
     private static WeakReference<Context> contextRef;
     private static volatile boolean paused;
+    public static volatile boolean hasNoNativeBinary = true;
+    public static volatile String nativeLoadError = "";
 
     static {
-        System.loadLibrary("emucore_4k");
+        try {
+            // Emu Hub currently targets the iQOO Z9x/standard 4 KiB Android userspace build.
+            System.loadLibrary("emucore_4k");
+            hasNoNativeBinary = false;
+        } catch (Throwable t) {
+            hasNoNativeBinary = true;
+            nativeLoadError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
+        }
+    }
+
+    public static boolean isNativeReady() {
+        return !hasNoNativeBinary;
     }
 
     public static void attachContext(Context context) {
@@ -60,11 +73,11 @@ public final class NativeApp {
     }
 
     public static void onPadRumble(int pad, int largeMotor, int smallMotor) {
-        // Intentionally no-op for the first Emu Hub integration pass.
+        // Touch-only integration pass; rumble can be wired later.
     }
 
     public static void playSound(String path) {
-        // RetroAchievements/UI sounds are not part of the offline PS2 runtime.
+        // UI/achievement sounds are intentionally disabled in Emu Hub's offline PS2 host.
     }
 
     public static int openContentUri(String uriString) {
