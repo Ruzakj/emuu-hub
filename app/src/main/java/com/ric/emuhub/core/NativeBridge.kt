@@ -10,8 +10,6 @@ object NativeBridge {
     external fun getWidth(): Int
     external fun getHeight(): Int
     external fun getSampleRate(): Int
-    external fun isShutdownRequested(): Boolean
-    external fun getLastError(): String
     external fun readAudio(samples: ShortArray): Int
     external fun saveState(path: String): Boolean
     external fun loadState(path: String): Boolean
