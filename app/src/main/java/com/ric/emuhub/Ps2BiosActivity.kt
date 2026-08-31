@@ -37,7 +37,7 @@ class Ps2BiosActivity : Activity() {
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK
         val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;setPadding(dp(24),dp(34),dp(24),dp(30));setBackgroundColor(Color.BLACK)}
         root.addView(TextView(this).apply{text="PS2 BIOS DIAGNOSTIC";textSize=25f;setTextColor(Color.WHITE);setTypeface(typeface,Typeface.BOLD)})
-        root.addView(TextView(this).apply{text="Sekarang fokusnya bukan ganti-ganti BIOS lagi. Menu ini akan menyimpan tahap native terakhir sebelum ARMSX2 mati.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12)})
+        root.addView(TextView(this).apply{text="Sekarang fokusnya bukan ganti-ganti BIOS lagi. Menu ini menyimpan tahap native terakhir dari proses PS2 terpisah.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12)})
 
         state=TextView(this).apply{textSize=13f;gravity=Gravity.CENTER;setPadding(dp(16),dp(16),dp(16),dp(16));background=rounded(0xFF0A0A0A.toInt(),18,0xFF252525.toInt())}
         root.addView(state,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(24)})
@@ -58,15 +58,25 @@ class Ps2BiosActivity : Activity() {
         if(b==null){state.text="BIOS BELUM VALID\nPilih dump BIOS PS2 4 MiB (disarankan).";state.setTextColor(0xFFBDBDBD.toInt())}
         else {val sha=runCatching{sha256(b)}.getOrDefault("?");val size=b.length();val verdict=if(size==4L*1024*1024)"4 MiB • ukuran retail normal" else "2 MiB • diterima untuk tes";state.text="BIOS READY\n${b.name}\n$verdict\nSHA-256\n$sha";state.setTextColor(0xFFE8E8E8.toInt())}
 
-        val trace=getSharedPreferences("ps2_runtime_trace",MODE_PRIVATE)
-        val stage=trace.getString("last_crash_stage",null)
-        val time=trace.getLong("last_crash_time",0L)
+        var stage:String?=null
+        var time=0L
+        val traceFile=File(filesDir,"ps2/last_native_stage.txt")
+        if(traceFile.isFile){
+            val lines=runCatching{traceFile.readLines()}.getOrDefault(emptyList())
+            stage=lines.getOrNull(0)?.takeIf{it.isNotBlank()}
+            time=lines.getOrNull(1)?.toLongOrNull()?:0L
+        }
         if(stage.isNullOrBlank()){
-            crashState.text="LAST NATIVE CRASH\nBelum ada data crash tersimpan."
+            val trace=getSharedPreferences("ps2_runtime_trace",MODE_PRIVATE)
+            stage=trace.getString("last_crash_stage",null)
+            time=trace.getLong("last_crash_time",0L)
+        }
+        if(stage.isNullOrBlank()){
+            crashState.text="LAST NATIVE STAGE\nBelum ada data tersimpan."
             crashState.setTextColor(0xFF9A9A9A.toInt())
         }else{
             val whenText=if(time>0L) SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(time)) else "-"
-            crashState.text="LAST NATIVE CRASH\n$stage\n$whenText\n\nScreenshot bagian ini saja setelah FC."
+            crashState.text="LAST NATIVE STAGE\n$stage\n$whenText\n\nKalau FC, stage ini adalah titik terakhir yang lolos."
             crashState.setTextColor(0xFFFFB4B4.toInt())
         }
     }
