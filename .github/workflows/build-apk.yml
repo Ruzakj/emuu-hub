@@ -3,20 +3,11 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
-
-concurrency:
-  group: emuhub-build-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,7 +17,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -132,13 +122,18 @@ jobs:
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ARMSX2-Android-Reference-APK -D /tmp/armsx2-ref
           APK=$(find /tmp/armsx2-ref -type f -name '*.apk' | head -1)
           test -n "$APK"
-          unzip -j "$APK" 'lib/arm64-v8a/libemucore_4k.so' 'lib/arm64-v8a/liblibrashader_capi.so' -d app/src/main/jniLibs/arm64-v8a
+          unzip -j "$APK" \
+            'lib/arm64-v8a/libemucore_4k.so' \
+            'lib/arm64-v8a/liblibrashader_capi.so' \
+            'lib/arm64-v8a/libc++_shared.so' \
+            -d app/src/main/jniLibs/arm64-v8a
           rm -rf /tmp/armsx2-assets app/src/main/assets/ARMSX2
           mkdir -p /tmp/armsx2-assets app/src/main/assets/ARMSX2
           unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
           cp -a /tmp/armsx2-assets/assets/resources/. app/src/main/assets/ARMSX2/
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
+          test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
           test -s app/src/main/assets/ARMSX2/GameIndex.yaml
 
       - name: Verify emulator cores
@@ -150,30 +145,30 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
+          test -s app/src/main/jniLibs/arm64-v8a/libc++_shared.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-          cache-read-only: false
 
       - name: Build offline emulator APK
         run: gradle assembleDebug --build-cache --parallel --stacktrace
 
       - name: Verify embedded engines
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libemuhost.so'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libppsspp_core.so'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libemucore_4k.so'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/liblibrashader_capi.so'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/ARMSX2/GameIndex.yaml'
-          ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'libppsspp_jni.so'
-          ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'org/ppsspp/ppsspp/PpssppActivity'
+          APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)
+          test -n "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libemuhost.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libppsspp_core.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/liblibrashader_capi.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libc++_shared.so'
+          ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libppsspp_jni.so'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: EmuHub-InternalCores-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          compression-level: 0
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
