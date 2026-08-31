@@ -34,14 +34,16 @@ class MainActivity : Activity() {
         private const val KEY_ROM_TREE_LEGACY = "rom_tree"
         private const val KEY_ROM_TREES = "rom_trees"
         private const val KEY_LIBRARY_CACHE = "library_cache_v2"
+        private const val KEY_PSP_RESOLUTION = "psp_resolution"
         private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")
         private val SWITCH = setOf("xci","nsp","nro")
         private val RECOGNIZED = INTERNAL + SWITCH
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
+        private val PSP_RES_VALUES = arrayOf("480x272","960x544")
+        private val PSP_RES_LABELS = arrayOf("1× • 480×272 • Performance","2× • 960×544 • Recommended")
     }
 
     data class GameEntry(val uri:String,val name:String,val ext:String,val folder:String="")
-
     private lateinit var library: LinearLayout
     private lateinit var status: TextView
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
@@ -49,10 +51,15 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ensureDefaultPspResolution()
         migrateLegacyFolder(); renderHome()
         val cached=loadCache(); if(cached.isNotEmpty())renderLibrary(cached,"${cached.size} game • cache") else status.text="Tambah folder ROM untuk membuat library."
         refreshAllFolders(false)
     }
+
+    private fun ensureDefaultPspResolution(){val value=prefs.getString(KEY_PSP_RESOLUTION,null);if(value !in PSP_RES_VALUES){prefs.edit().putString(KEY_PSP_RESOLUTION,"960x544").apply();writePspResolution("960x544")}else writePspResolution(value!!)}
+    private fun writePspResolution(value:String){val safe=if(value in PSP_RES_VALUES)value else "960x544";val root=File(filesDir,"system").apply{mkdirs()};File(root,"ppsspp_resolution.cfg").writeText(safe)}
+    private fun showPspResolutionChooser(uri:Uri,name:String,ext:String){val current=prefs.getString(KEY_PSP_RESOLUTION,"960x544")?:"960x544";val checked=PSP_RES_VALUES.indexOf(current).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Resolusi PSP").setSingleChoiceItems(PSP_RES_LABELS,checked){dialog,which->val value=PSP_RES_VALUES[which];prefs.edit().putString(KEY_PSP_RESOLUTION,value).apply();writePspResolution(value);dialog.dismiss();copyAndLaunchInternal(uri,name,ext,"ppsspp")}.setNegativeButton("Batal",null).show()}
     private fun migrateLegacyFolder(){val old=prefs.getString(KEY_ROM_TREE_LEGACY,null)?:return;val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();if(set.add(old))prefs.edit().putStringSet(KEY_ROM_TREES,set).remove(KEY_ROM_TREE_LEGACY).apply() else prefs.edit().remove(KEY_ROM_TREE_LEGACY).apply()}
     private fun renderHome(){val outer=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(28,22,28,20);setBackgroundColor(0xFF090A0F.toInt())};outer.addView(TextView(this).apply{text="EMU HUB";textSize=29f;setTypeface(typeface,Typeface.BOLD);setTextColor(0xFFFFFFFF.toInt())});status=TextView(this).apply{text="Library offline • internal cores";textSize=13f;setTextColor(0xFF9B9EAA.toInt());setPadding(0,5,0,13)};outer.addView(status);val actions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL};actions.addView(Button(this).apply{text="+ FOLDER";setOnClickListener{chooseRomFolder()}},LinearLayout.LayoutParams(0,-2,1f));actions.addView(Button(this).apply{text="REFRESH";setOnClickListener{refreshAllFolders(true)}},LinearLayout.LayoutParams(0,-2,1f));actions.addView(Button(this).apply{text="FILE";setOnClickListener{openRomPicker()}},LinearLayout.LayoutParams(0,-2,1f));outer.addView(actions);library=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(0,14,0,20)};val scroll=ScrollView(this).apply{isFillViewport=true;addView(library,ViewGroup.LayoutParams(-1,-2))};outer.addView(scroll,LinearLayout.LayoutParams(-1,0,1f));setContentView(outer)}
     private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)},REQUEST_FOLDER)}
@@ -64,8 +71,8 @@ class MainActivity : Activity() {
     private fun rounded(color:Int,radius:Float)=GradientDrawable().apply{setColor(color);cornerRadius=radius}
     private fun systemCode(e:String)=when(e){"gb","gbc","gba"->"GBA";"nes"->"NES";"sfc","smc"->"SNES";"bin","cue","chd"->"PS1";"ecm"->"ECM";"iso"->"ISO";"cso"->"PSP";"xci","nsp","nro"->"NSW";else->e.uppercase().take(4)}
     private fun systemColor(e:String)=when(e){"xci","nsp","nro"->0xFF315A75.toInt();"bin","cue","chd","iso","ecm"->0xFF493D68.toInt();"cso"->0xFF314E68.toInt();"gba","gb","gbc"->0xFF355B49.toInt();else->0xFF41444F.toInt()}
-    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="cso"->copyAndLaunchInternal(uri,name,ext,"ppsspp");else->copyAndLaunchInternal(uri,name,ext,null)}}
-    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Buka ISO sebagai").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP core")){_,which->copyAndLaunchInternal(uri,name,"iso",if(which==0)"pcsx" else "ppsspp")}.setNegativeButton("Batal",null).show()}
+    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
+    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Buka ISO sebagai").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP core")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"iso","pcsx") else showPspResolutionChooser(uri,name,"iso")}.setNegativeButton("Batal",null).show()}
     private fun launchEden(uri:Uri){val pkg=EDEN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{Toast.makeText(this,"Eden / Eden Optimized tidak terdeteksi.",Toast.LENGTH_LONG).show();return};try{startActivity(Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,"application/octet-stream");setPackage(pkg);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);clipData=ClipData.newRawUri("Switch ROM",uri)})}catch(_:ActivityNotFoundException){packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)}catch(_:Exception){packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)}}
     private fun displayName(uri:Uri):String?{if(uri.scheme=="content")contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use{c->if(c.moveToFirst()){val i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(i>=0)return c.getString(i)}};return uri.lastPathSegment?.substringAfterLast('/')}
     private fun extension(name:String?)=name.orEmpty().substringAfterLast('.',"").lowercase()
@@ -77,6 +84,6 @@ class MainActivity : Activity() {
     private fun coreIdFor(ext:String)=when(ext){"nes"->"fceumm";"sfc","smc"->"snes9x";"bin","cue","chd"->"pcsx";"cso"->"ppsspp";else->"mgba"}
     private fun saveCache(games:List<GameEntry>){val arr=JSONArray();games.forEach{g->arr.put(JSONObject().put("u",g.uri).put("n",g.name).put("e",g.ext).put("f",g.folder))};prefs.edit().putString(KEY_LIBRARY_CACHE,arr.toString()).apply()}
     private fun loadCache():List<GameEntry>{return runCatching{val arr=JSONArray(prefs.getString(KEY_LIBRARY_CACHE,"[]"));buildList{for(i in 0 until arr.length()){val o=arr.getJSONObject(i);add(GameEntry(o.getString("u"),o.getString("n"),o.getString("e"),o.optString("f")))}}}.getOrDefault(emptyList())}
-    @Deprecated("Framework compatibility") override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK)return;if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return};if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="cso"->copyAndLaunchInternal(uri,name,ext,"ppsspp");ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}}
+    @Deprecated("Framework compatibility") override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK)return;if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return};if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}}
     override fun onDestroy(){scanExecutor.shutdownNow();super.onDestroy()}
 }
