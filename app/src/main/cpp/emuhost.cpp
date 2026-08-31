@@ -74,6 +74,7 @@ static int pixelFormat=RETRO_PIXEL_FORMAT_0RGB1555;
 static unsigned frameW=240,frameH=160;
 static int sampleRate=44100;
 static std::vector<uint32_t> frame;
+static std::vector<uint32_t> rgbaScratch;
 static std::vector<int16_t> audioBuffer;
 static bool buttons[16]={};
 static int16_t analogX=0,analogY=0;
@@ -113,9 +114,7 @@ static bool makeHwCurrent(){
     return hwEnabled && eglDisplay!=EGL_NO_DISPLAY && eglSurface!=EGL_NO_SURFACE && eglContext!=EGL_NO_CONTEXT &&
            eglMakeCurrent(eglDisplay,eglSurface,eglSurface,eglContext)==EGL_TRUE;
 }
-static void releaseHwCurrent(){
-    if(eglDisplay!=EGL_NO_DISPLAY) eglMakeCurrent(eglDisplay,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
-}
+static void releaseHwCurrent(){ if(eglDisplay!=EGL_NO_DISPLAY) eglMakeCurrent(eglDisplay,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT); }
 static uintptr_t hwFramebuffer(){ return 0; }
 static void* hwProc(const char* name){ if(!name)return nullptr; void* p=reinterpret_cast<void*>(eglGetProcAddress(name)); if(!p)p=dlsym(RTLD_DEFAULT,name); return p; }
 
@@ -133,9 +132,7 @@ static void destroyHw(){
 
 static bool createHw(retro_hw_render_callback* cb){
     if(!cb)return false;
-    if(cb->context_type!=RETRO_HW_CONTEXT_OPENGLES2 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES3 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES_VERSION){
-        LOGE("Unsupported HW context type %d",(int)cb->context_type); return false;
-    }
+    if(cb->context_type!=RETRO_HW_CONTEXT_OPENGLES2 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES3 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES_VERSION){ LOGE("Unsupported HW context type %d",(int)cb->context_type); return false; }
     destroyHw();
     eglDisplay=eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if(eglDisplay==EGL_NO_DISPLAY || !eglInitialize(eglDisplay,nullptr,nullptr)){ LOGE("eglInitialize failed: 0x%x",eglGetError()); destroyHw(); return false; }
@@ -171,13 +168,18 @@ static const char* ppssppOption(const char* key){
     if(!key)return nullptr;
     if(std::strcmp(key,"ppsspp_backend")==0)return "opengl";
     if(std::strcmp(key,"ppsspp_rendering_mode")==0)return "OpenGL";
-    if(std::strcmp(key,"ppsspp_internal_resolution")==0)return "480x272";
+    if(std::strcmp(key,"ppsspp_internal_resolution")==0)return "960x544";
     if(std::strcmp(key,"ppsspp_cpu_core")==0)return "JIT";
-    if(std::strcmp(key,"ppsspp_frameskip")==0)return "0";
-    if(std::strcmp(key,"ppsspp_auto_frameskip")==0)return "disabled";
+    if(std::strcmp(key,"ppsspp_fast_memory")==0)return "enabled";
+    if(std::strcmp(key,"ppsspp_io_timing_method")==0)return "Fast";
+    if(std::strcmp(key,"ppsspp_frameskip")==0)return "1";
+    if(std::strcmp(key,"ppsspp_auto_frameskip")==0)return "enabled";
     if(std::strcmp(key,"ppsspp_software_rendering")==0)return "disabled";
     if(std::strcmp(key,"ppsspp_skip_buffer_effects")==0)return "disabled";
-    if(std::strcmp(key,"ppsspp_texture_scaling_level")==0)return "1";
+    if(std::strcmp(key,"ppsspp_gpu_hardware_transform")==0)return "enabled";
+    if(std::strcmp(key,"ppsspp_software_skinning")==0)return "enabled";
+    if(std::strcmp(key,"ppsspp_hardware_tesselation")==0)return "disabled";
+    if(std::strcmp(key,"ppsspp_texture_scaling_level")==0)return "disabled";
     return nullptr;
 }
 
@@ -204,13 +206,28 @@ static bool envCb(unsigned cmd,void* data){
 }
 
 static void captureHw(unsigned width,unsigned height){
-    if(width==0||height==0)return;
-    frameW=width;frameH=height;std::vector<uint8_t>rgba((size_t)width*height*4);
-    GLint previousFbo=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&previousFbo);glBindFramebuffer(GL_FRAMEBUFFER,0);glFinish();glPixelStorei(GL_PACK_ALIGNMENT,1);
-    glReadPixels(0,0,(GLsizei)width,(GLsizei)height,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());GLenum err=glGetError();glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)previousFbo);
+    if(width==0||height==0||width>1024||height>1024)return;
+    frameW=width;frameH=height;
+    const size_t pixelCount=(size_t)width*height;
+    if(rgbaScratch.size()!=pixelCount)rgbaScratch.resize(pixelCount);
+    if(frame.size()!=pixelCount)frame.resize(pixelCount);
+    GLint previousFbo=0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING,&previousFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER,0);
+    glPixelStorei(GL_PACK_ALIGNMENT,4);
+    glReadPixels(0,0,(GLsizei)width,(GLsizei)height,GL_RGBA,GL_UNSIGNED_BYTE,rgbaScratch.data());
+    const GLenum err=glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)previousFbo);
     if(err!=GL_NO_ERROR){LOGE("glReadPixels failed: 0x%x, %ux%u",err,width,height);return;}
-    frame.resize((size_t)width*height);
-    for(unsigned y=0;y<height;y++){unsigned sy=hwBottomLeft?(height-1-y):y;for(unsigned x=0;x<width;x++){size_t s=((size_t)sy*width+x)*4;frame[(size_t)y*width+x]=0xFF000000u|((uint32_t)rgba[s]<<16)|((uint32_t)rgba[s+1]<<8)|rgba[s+2];}}
+    for(unsigned y=0;y<height;y++){
+        const unsigned sy=hwBottomLeft?(height-1-y):y;
+        const uint32_t* src=rgbaScratch.data()+(size_t)sy*width;
+        uint32_t* dst=frame.data()+(size_t)y*width;
+        for(unsigned x=0;x<width;x++){
+            const uint32_t p=src[x];
+            dst[x]=0xFF000000u|((p&0x000000FFu)<<16)|(p&0x0000FF00u)|((p&0x00FF0000u)>>16);
+        }
+    }
 }
 
 static void videoCb(const void* data,unsigned width,unsigned height,size_t pitch){
@@ -232,13 +249,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init
     opt(p_retro_set_controller_port_device,"retro_set_controller_port_device");opt(p_retro_serialize_size,"retro_serialize_size");opt(p_retro_serialize,"retro_serialize");opt(p_retro_unserialize,"retro_unserialize");
     p_retro_set_environment(envCb);p_retro_set_video_refresh(videoCb);p_retro_set_audio_sample(audioCb);p_retro_set_audio_sample_batch(audioBatchCb);p_retro_set_input_poll(inputPollCb);p_retro_set_input_state(inputStateCb);
     p_retro_init();
-    // Most hardware cores, including PPSSPP, request SET_HW_RENDER later from
-    // retro_load_game(). Only reset here if a core requested it during init.
-    if(hwEnabled&&hwContextReset&&!hwResetCalled){
-        if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}
-        hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();
-        LOGI("HW context_reset completed after retro_init");
-    }
+    if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}
     if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
     LOGI("Core initialized: ppsspp=%d hw=%d reset=%d",isPpsspp?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
 }
@@ -247,33 +258,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setContr
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){
     const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};bool ok=p_retro_load_game&&p_retro_load_game(&info);e->ReleaseStringUTFChars(path,p);
     if(!ok){LOGE("retro_load_game failed");if(hwEnabled)releaseHwCurrent();return JNI_FALSE;}
-
-    // PPSSPP requests SET_HW_RENDER from inside retro_load_game(). At this point
-    // createHw() has produced the EGL context and installed the frontend callbacks.
-    // The core must receive context_reset exactly once before its first retro_run().
-    if(hwEnabled&&!hwResetCalled){
-        if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}
-        if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}
-        LOGI("Calling PPSSPP context_reset after retro_load_game");
-        hwContextReset();
-        hwResetCalled=true;
-        glViewport(0,0,1024,1024);glFinish();
-        LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");
-    }
-
+    if(hwEnabled&&!hwResetCalled){if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}LOGI("Calling PPSSPP context_reset after retro_load_game");hwContextReset();hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");}
     if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d reset=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0,hwResetCalled?1:0);}
-    if(hwEnabled)releaseHwCurrent();
-    return JNI_TRUE;
+    if(hwEnabled)releaseHwCurrent();return JNI_TRUE;
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_runFrame(JNIEnv*e,jobject,jintArray p){
-    if(shutdownRequested)return -2;
-    if(!p_retro_run)return -1;
-    if(hwEnabled){
-        if(!hwResetCalled){LOGE("Blocked retro_run: HW context was never reset");return -4;}
-        if(!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}
-    }
-    p_retro_run();
-    if(shutdownRequested)return -2;
+    if(shutdownRequested)return -2;if(!p_retro_run)return -1;
+    if(hwEnabled){if(!hwResetCalled){LOGE("Blocked retro_run: HW context was never reset");return -4;}if(!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}}
+    p_retro_run();if(shutdownRequested)return -2;
     jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,(jsize)c,(const jint*)frame.data());return(jint)c;
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getWidth(JNIEnv*,jobject){return frameW;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getHeight(JNIEnv*,jobject){return frameH;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getSampleRate(JNIEnv*,jobject){return sampleRate;}
@@ -281,10 +273,4 @@ extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudi
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_saveState(JNIEnv*e,jobject,jstring path){if(!p_retro_serialize_size||!p_retro_serialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();size_t z=p_retro_serialize_size();if(!z)return JNI_FALSE;std::vector<uint8_t>s(z);if(!p_retro_serialize(s.data(),z))return JNI_FALSE;const char*p=e->GetStringUTFChars(path,nullptr);std::ofstream o(p,std::ios::binary|std::ios::trunc);e->ReleaseStringUTFChars(path,p);if(!o)return JNI_FALSE;o.write((const char*)s.data(),s.size());return o.good()?JNI_TRUE:JNI_FALSE;}
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadState(JNIEnv*e,jobject,jstring path){if(!p_retro_unserialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();const char*p=e->GetStringUTFChars(path,nullptr);std::ifstream in(p,std::ios::binary|std::ios::ate);e->ReleaseStringUTFChars(path,p);if(!in)return JNI_FALSE;auto z=in.tellg();if(z<=0)return JNI_FALSE;in.seekg(0);std::vector<uint8_t>s((size_t)z);if(!in.read((char*)s.data(),z))return JNI_FALSE;audioBuffer.clear();return p_retro_unserialize(s.data(),s.size())?JNI_TRUE:JNI_FALSE;}
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setButton(JNIEnv*,jobject,jint id,jboolean p){if(id>=0&&id<16)buttons[id]=p;}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setAnalog(JNIEnv*,jobject,jint x,jint y){analogX=(int16_t)std::max(-32767,std::min(32767,(int)x));analogY=(int16_t)std::max(-32767,std::min(32767,(int)y));}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_reset(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_reset)p_retro_reset();}
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){
-    if(hwEnabled)makeHwCurrent();
-    if(p_retro_unload_game)p_retro_unload_game();
-    destroyHw();
-    if(p_retro_deinit)p_retro_deinit();
-    if(core)dlclose(core);core=nullptr;isPpsspp=false;shutdownRequested=false;frame.clear();audioBuffer.clear();std::fill(std::begin(buttons),std::end(buttons),false);analogX=analogY=0;p_retro_set_controller_port_device=nullptr;
-}
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_unload_game)p_retro_unload_game();destroyHw();if(p_retro_deinit)p_retro_deinit();if(core)dlclose(core);core=nullptr;isPpsspp=false;shutdownRequested=false;frame.clear();rgbaScratch.clear();audioBuffer.clear();std::fill(std::begin(buttons),std::end(buttons),false);analogX=analogY=0;p_retro_set_controller_port_device=nullptr;}
