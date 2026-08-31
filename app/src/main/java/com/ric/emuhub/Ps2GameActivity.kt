@@ -1,13 +1,10 @@
 package com.ric.emuhub
 
 import android.app.Activity
-import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -25,17 +22,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** Dedicated Android-native ARMSX2 host. Kept separate from the libretro/GLES path. */
 class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
-    companion object {
-        private const val REQUEST_BIOS = 2201
-        private const val BIOS_PREF = "ps2_bios_name"
-    }
-
     private lateinit var surface: SurfaceView
     private lateinit var root: FrameLayout
     private lateinit var status: TextView
     private lateinit var romPath: String
     private var surfaceReady = false
+    private var surfaceWidth = 0
+    private var surfaceHeight = 0
     private var initialized = false
+    private var nativeSurfaceAttached = false
     private val vmStarted = AtomicBoolean(false)
     private val shuttingDown = AtomicBoolean(false)
     private var vmThread: Thread? = null
@@ -59,6 +54,13 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         romPath = intent.getStringExtra("romPath").orEmpty()
         if (romPath.isBlank() || !File(romPath).isFile) {
             Toast.makeText(this, "PS2 ROM tidak ditemukan.", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
+        val bios = Ps2BiosActivity.selectedBios(this)
+        if (bios == null) {
+            Toast.makeText(this, "Pilih BIOS PS2 dulu dari menu PS2.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -100,6 +102,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             setPadding(0, 0, 0, 0)
             background = rounded(0x55000000, size / 2)
             setOnTouchListener { _, event ->
+                if (!initialized || !vmStarted.get()) return@setOnTouchListener true
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                         runCatching { NativeApp.setPadButton(binding, 255, true) }
@@ -116,7 +119,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun addControllerOverlay() {
-        // PCSX2 DualShock2 binding order: D-pad 0..3, face 4..7, Select 8, Start 11, L2/R2 12/13, L1/R1 14/15.
         fun add(label: String, binding: Int, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, size: Int = 50) {
             root.addView(padButton(label, binding, size), FrameLayout.LayoutParams(dp(size), dp(size), gravity).apply {
                 leftMargin = dp(left); topMargin = dp(top); rightMargin = dp(right); bottomMargin = dp(bottom)
@@ -157,11 +159,12 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             try {
                 val dataRoot = File(filesDir, "ps2").apply { mkdirs() }
                 val resourcesDir = File(dataRoot, "resources")
-                copyAssetTree("ARMSX2", resourcesDir)
-                val biosDir = File(dataRoot, "bios").apply { mkdirs() }
-                runOnUiThread {
-                    if (!hasBios(biosDir)) requestBios() else initializeCore(dataRoot, biosDir)
+                if (!File(resourcesDir, "GameIndex.yaml").isFile) {
+                    copyAssetTree("ARMSX2", resourcesDir)
                 }
+                val biosDir = Ps2BiosActivity.biosDir(this)
+                if (Ps2BiosActivity.selectedBios(this) == null) error("BIOS PS2 belum siap")
+                runOnUiThread { initializeCore(dataRoot, biosDir) }
             } catch (t: Throwable) {
                 runOnUiThread {
                     Toast.makeText(this, "PS2 runtime gagal disiapkan: ${t.message}", Toast.LENGTH_LONG).show()
@@ -182,21 +185,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         children.forEach { child -> copyAssetTree("$assetPath/$child", File(target, child)) }
     }
 
-    private fun hasBios(dir: File): Boolean = dir.listFiles()?.any { it.isFile && it.length() in 2L * 1024L * 1024L..8L * 1024L * 1024L } == true
-
-    private fun requestBios() {
-        status.text = "PS2 • pilih BIOS milikmu sekali saja"
-        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/octet-stream"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }, REQUEST_BIOS)
-    }
-
     private fun initializeCore(dataRoot: File, biosDir: File) {
-        if (initialized) return
+        if (initialized || isFinishing) return
         try {
             NativeApp.attachContext(this)
+            if (!NativeApp.isNativeReady()) {
+                error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+            }
+
+            status.text = "PS2 • initializing ARMSX2"
             NativeApp.initialize(dataRoot.absolutePath, biosDir.absolutePath, Build.VERSION.SDK_INT)
             NativeApp.renderVulkan()
             NativeApp.renderUpscalemultiplier(1.0f)
@@ -204,23 +201,42 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             if (Build.VERSION.SDK_INT >= 33) NativeApp.setAdpfEnabled(true)
             NativeApp.setAudioVolume(100)
             initialized = true
+
+            // Important: never call ARMSX2 surface JNI before initialize().
+            attachNativeSurfaceIfReady()
             status.text = "PS2 • ARMSX2 Vulkan • 1× native"
             maybeStartVm()
         } catch (t: Throwable) {
-            Toast.makeText(this, "ARMSX2 init gagal: ${t.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
             finish()
         }
     }
 
+    private fun attachNativeSurfaceIfReady() {
+        if (!initialized || !surfaceReady || nativeSurfaceAttached) return
+        val holder = surface.holder
+        val w = if (surfaceWidth > 0) surfaceWidth else surface.width
+        val h = if (surfaceHeight > 0) surfaceHeight else surface.height
+        if (!holder.surface.isValid || w <= 0 || h <= 0) return
+        NativeApp.onNativeSurfaceCreated()
+        NativeApp.onNativeSurfaceChanged(holder.surface, w, h)
+        nativeSurfaceAttached = true
+    }
+
     private fun maybeStartVm() {
-        if (!initialized || !surfaceReady || !vmStarted.compareAndSet(false, true)) return
+        if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
         val hz = if (Build.VERSION.SDK_INT >= 30) display?.refreshRate ?: 60f else @Suppress("DEPRECATION") windowManager.defaultDisplay.refreshRate
         runCatching { NativeApp.setDisplayRefreshRate(hz) }
+        status.text = "PS2 • booting game"
         vmThread = Thread({
-            val ok = runCatching { NativeApp.runVMThread(romPath) }.getOrElse { false }
+            val result = runCatching { NativeApp.runVMThread(romPath) }
+            val ok = result.getOrDefault(false)
+            val error = result.exceptionOrNull()
             runOnUiThread {
                 if (!isFinishing && !shuttingDown.get()) {
-                    if (!ok) Toast.makeText(this, "PS2 gagal boot. Cek BIOS/ROM.", Toast.LENGTH_LONG).show()
+                    if (!ok) {
+                        Toast.makeText(this, "PS2 gagal boot${error?.message?.let { ": $it" } ?: ". Cek BIOS/ROM."}", Toast.LENGTH_LONG).show()
+                    }
                     finish()
                 }
             }
@@ -229,19 +245,28 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
-        runCatching { NativeApp.onNativeSurfaceCreated() }
+        // Native surface attachment is deferred until ARMSX2 initialize() has completed.
+        if (initialized) runCatching { attachNativeSurfaceIfReady() }
         maybeStartVm()
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         surfaceReady = true
-        runCatching { NativeApp.onNativeSurfaceChanged(holder.surface, width, height) }
+        surfaceWidth = width
+        surfaceHeight = height
+        if (initialized) {
+            if (!nativeSurfaceAttached) runCatching { attachNativeSurfaceIfReady() }
+            else runCatching { NativeApp.onNativeSurfaceChanged(holder.surface, width, height) }
+        }
         maybeStartVm()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         surfaceReady = false
-        runCatching { NativeApp.onNativeSurfaceDestroyed() }
+        if (initialized && nativeSurfaceAttached) {
+            runCatching { NativeApp.onNativeSurfaceDestroyed() }
+            nativeSurfaceAttached = false
+        }
     }
 
     override fun onPause() {
@@ -252,14 +277,22 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onResume() {
         super.onResume()
-        if (initialized && vmStarted.get() && NativeApp.isPaused()) runCatching { NativeApp.resume() }
+        if (initialized && vmStarted.get() && runCatching { NativeApp.isPaused() }.getOrDefault(false)) {
+            runCatching { NativeApp.resume() }
+        }
     }
 
     private fun shutdownCore() {
         if (!shuttingDown.compareAndSet(false, true)) return
-        runCatching { NativeApp.resetKeyStatus() }
+        if (initialized) runCatching { NativeApp.resetKeyStatus() }
         if (initialized && vmStarted.get()) runCatching { NativeApp.shutdown() }
-        vmThread?.let { thread -> if (thread.isAlive && thread !== Thread.currentThread()) runCatching { thread.join(2500) } }
+        vmThread?.let { thread ->
+            if (thread.isAlive && thread !== Thread.currentThread()) runCatching { thread.join(2500) }
+        }
+        if (initialized && nativeSurfaceAttached) {
+            runCatching { NativeApp.onNativeSurfaceDestroyed() }
+            nativeSurfaceAttached = false
+        }
     }
 
     override fun finish() {
@@ -275,43 +308,5 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     @Deprecated("Framework compatibility")
     override fun onBackPressed() {
         finish()
-    }
-
-    @Deprecated("Framework compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_BIOS) return
-        if (resultCode != RESULT_OK) {
-            Toast.makeText(this, "PS2 butuh BIOS PS2 milikmu.", Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-        val uri: Uri = data?.data ?: run { finish(); return }
-        try {
-            val root = File(filesDir, "ps2").apply { mkdirs() }
-            val biosDir = File(root, "bios").apply { mkdirs() }
-            val name = queryName(uri)?.replace(Regex("[^A-Za-z0-9._-]"), "_") ?: "bios.bin"
-            val out = File(biosDir, name)
-            contentResolver.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it) } } ?: error("BIOS tidak dapat dibaca")
-            if (out.length() !in 2L * 1024L * 1024L..8L * 1024L * 1024L) {
-                out.delete()
-                error("Ukuran BIOS tidak valid")
-            }
-            getSharedPreferences("ps2", MODE_PRIVATE).edit().putString(BIOS_PREF, out.name).apply()
-            initializeCore(root, biosDir)
-        } catch (t: Throwable) {
-            Toast.makeText(this, "BIOS gagal: ${t.message}", Toast.LENGTH_LONG).show()
-            finish()
-        }
-    }
-
-    private fun queryName(uri: Uri): String? {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) {
-                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (i >= 0) return c.getString(i)
-            }
-        }
-        return uri.lastPathSegment?.substringAfterLast('/')
     }
 }
