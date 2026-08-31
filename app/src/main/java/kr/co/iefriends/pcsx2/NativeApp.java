@@ -21,7 +21,13 @@ public final class NativeApp {
 
     static {
         try {
-            // Emu Hub currently targets the iQOO Z9x/standard 4 KiB Android userspace build.
+            // First-frame priority: load the same dependency chain explicitly before
+            // the 4 KiB ARMSX2 core. This avoids late dlopen failures when Vulkan
+            // shader compilation starts on the target iQOO Z9x/Adreno 710.
+            System.loadLibrary("c++_shared");
+            try { System.loadLibrary("SPIRV-Tools-shared"); } catch (Throwable ignored) {}
+            try { System.loadLibrary("shaderc_shared"); } catch (Throwable ignored) {}
+            System.loadLibrary("librashader_capi");
             System.loadLibrary("emucore_4k");
             hasNoNativeBinary = false;
         } catch (Throwable t) {
@@ -63,7 +69,6 @@ public final class NativeApp {
     public static native void setAudioMuted(boolean muted);
     public static native void flushShaderCache();
 
-    // Native callbacks looked up during initialize(). Keep exact names/signatures.
     public static void vmSetPaused(boolean value) {
         paused = value;
     }
@@ -73,11 +78,9 @@ public final class NativeApp {
     }
 
     public static void onPadRumble(int pad, int largeMotor, int smallMotor) {
-        // Touch-only integration pass; rumble can be wired later.
     }
 
     public static void playSound(String path) {
-        // UI/achievement sounds are intentionally disabled in Emu Hub's offline PS2 host.
     }
 
     public static int openContentUri(String uriString) {
