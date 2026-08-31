@@ -136,11 +136,19 @@ class MainActivity : Activity() {
         status=textView("Offline cores • local ROM library",12f,0xFF8B8B8B.toInt())
         hero.addView(status,LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(5)})
 
-        val quickRow=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
-        quickRow.addView(actionTile("＋","ADD FOLDER","Scan a ROM folder") { chooseRomFolder() },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(8)})
-        quickRow.addView(actionTile("↻","REFRESH","Rescan library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(4);rightMargin=dp(4)})
-        quickRow.addView(actionTile("▶","OPEN FILE","Launch one ROM") { openRomPicker() },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(8)})
-        content.addView(quickRow,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(104)).apply{topMargin=dp(14)})
+        val quickGrid=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+        val quickTop=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        quickTop.addView(actionTile("＋","ADD FOLDER","Scan a ROM folder") { chooseRomFolder() },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(5)})
+        quickTop.addView(actionTile("PS2","BIOS","Setup / test PS2 BIOS") {
+            status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • open diagnostic" else "PS2 BIOS setup • pilih BIOS dulu"
+            startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))
+        },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})
+        quickGrid.addView(quickTop,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(104)))
+        val quickBottom=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        quickBottom.addView(actionTile("↻","REFRESH","Rescan library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(5)})
+        quickBottom.addView(actionTile("▶","OPEN FILE","Launch one ROM") { openRomPicker() },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})
+        quickGrid.addView(quickBottom,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(104)).apply{topMargin=dp(10)})
+        content.addView(quickGrid,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(218)).apply{topMargin=dp(14)})
 
         content.addView(sectionTitle("CONSOLE HUB"),LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(24)})
         content.addView(buildConsoleStrip(),LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(72)).apply{topMargin=dp(10)})
