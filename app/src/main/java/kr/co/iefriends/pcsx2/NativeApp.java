@@ -5,12 +5,14 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.system.Os;
+import android.system.OsConstants;
 import android.view.Surface;
 
 import java.io.File;
 import java.lang.ref.WeakReference;
 
-/** Minimal ARMSX2 Android JNI bridge used by Emu Hub's dedicated PS2 activity. */
+/** ARMSX2 JNI bridge. Native loading intentionally mirrors upstream ARMSX2. */
 public final class NativeApp {
     private NativeApp() {}
 
@@ -20,33 +22,40 @@ public final class NativeApp {
     public static volatile String nativeLoadError = "";
 
     static {
+        final String libraryName = selectNativeLibraryName();
         try {
-            // First-frame priority: load the same dependency chain explicitly before
-            // the 4 KiB ARMSX2 core. This avoids late dlopen failures when Vulkan
-            // shader compilation starts on the target iQOO Z9x/Adreno 710.
-            System.loadLibrary("c++_shared");
-            try { System.loadLibrary("SPIRV-Tools-shared"); } catch (Throwable ignored) {}
-            try { System.loadLibrary("shaderc_shared"); } catch (Throwable ignored) {}
-            System.loadLibrary("librashader_capi");
-            System.loadLibrary("emucore_4k");
+            // IMPORTANT: upstream ARMSX2 loads ONLY emucore here. Android's dynamic linker
+            // resolves libc++, librashader, shaderc/SPIRV transitively. Explicitly preloading
+            // that dependency chain in Emu Hub was a divergence and the crash breadcrumb
+            // proves the process was dying while NativeApp itself was being initialized.
+            System.loadLibrary(libraryName);
             hasNoNativeBinary = false;
+            nativeLoadError = "";
+        } catch (UnsatisfiedLinkError e) {
+            hasNoNativeBinary = true;
+            nativeLoadError = "UnsatisfiedLinkError: " + String.valueOf(e.getMessage());
         } catch (Throwable t) {
             hasNoNativeBinary = true;
             nativeLoadError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
         }
     }
 
-    public static boolean isNativeReady() {
-        return !hasNoNativeBinary;
+    private static long getRuntimePageSize() {
+        try {
+            long pageSize = Os.sysconf(OsConstants._SC_PAGESIZE);
+            return pageSize > 0 ? pageSize : 4096;
+        } catch (Throwable ignored) {
+            return 4096;
+        }
     }
 
-    public static void attachContext(Context context) {
-        contextRef = new WeakReference<>(context.getApplicationContext());
+    private static String selectNativeLibraryName() {
+        return getRuntimePageSize() >= 16384 ? "emucore_16k" : "emucore_4k";
     }
 
-    public static Context getContext() {
-        return contextRef == null ? null : contextRef.get();
-    }
+    public static boolean isNativeReady() { return !hasNoNativeBinary; }
+    public static void attachContext(Context context) { contextRef = new WeakReference<>(context.getApplicationContext()); }
+    public static Context getContext() { return contextRef == null ? null : contextRef.get(); }
 
     public static native void initialize(String path, String biosFolder, int apiVer);
     public static native void onNativeSurfaceCreated();
@@ -69,19 +78,10 @@ public final class NativeApp {
     public static native void setAudioMuted(boolean muted);
     public static native void flushShaderCache();
 
-    public static void vmSetPaused(boolean value) {
-        paused = value;
-    }
-
-    public static boolean isPaused() {
-        return paused;
-    }
-
-    public static void onPadRumble(int pad, int largeMotor, int smallMotor) {
-    }
-
-    public static void playSound(String path) {
-    }
+    public static void vmSetPaused(boolean value) { paused = value; }
+    public static boolean isPaused() { return paused; }
+    public static void onPadRumble(int pad, int largeMotor, int smallMotor) {}
+    public static void playSound(String path) {}
 
     public static int openContentUri(String uriString) {
         Context context = getContext();
@@ -90,9 +90,7 @@ public final class NativeApp {
         try {
             ParcelFileDescriptor pfd = resolver.openFileDescriptor(Uri.parse(uriString), "r");
             return pfd == null ? -1 : pfd.detachFd();
-        } catch (Throwable ignored) {
-            return -1;
-        }
+        } catch (Throwable ignored) { return -1; }
     }
 
     public static boolean createDirectoryPath(String path) {
@@ -108,12 +106,8 @@ public final class NativeApp {
             File parent = file.getParentFile();
             if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
             return file.exists() || file.createNewFile();
-        } catch (Throwable ignored) {
-            return false;
-        }
+        } catch (Throwable ignored) { return false; }
     }
 
-    public static int androidApiLevel() {
-        return Build.VERSION.SDK_INT;
-    }
+    public static int androidApiLevel() { return Build.VERSION.SDK_INT; }
 }
