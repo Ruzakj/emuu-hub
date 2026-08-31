@@ -44,9 +44,18 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private var vmThread: Thread? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     private fun trace(stage: String, active: Boolean = true) {
         getSharedPreferences(TRACE_PREFS, MODE_PRIVATE).edit()
-            .putString(TRACE_STAGE, stage).putBoolean(TRACE_ACTIVE, active).commit()
+            .putString(TRACE_STAGE, stage)
+            .putBoolean(TRACE_ACTIVE, active)
+            .putString("last_crash_stage", stage)
+            .putLong("last_crash_time", System.currentTimeMillis())
+            .commit()
+        runCatching {
+            val dir = File(filesDir, "ps2").apply { mkdirs() }
+            File(dir, "last_native_stage.txt").writeText("$stage\n${System.currentTimeMillis()}\n")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +96,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         Thread({ try {
             trace("preparing-resources")
             val dataRoot=File(filesDir,"ps2").apply{mkdirs()}; val resourcesDir=File(dataRoot,"resources")
-            // Always refresh ARMSX2 resources. An old shader/GameDB copy can survive an APK update.
             resourcesDir.deleteRecursively(); copyAssetTree("ARMSX2",resourcesDir)
             val biosDir=Ps2BiosActivity.biosDir(this)
             trace("resources-ready"); runOnUiThread{initializeCore(dataRoot,biosDir)}
@@ -99,8 +107,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun initializeSdlBridge() {
         if (sdlReady.get()) return
         trace("before-sdl-setup")
-        // ARMSX2's own Android host performs these calls before any VM thread starts.
-        // The native core uses SDL's Android JNI environment for filesystem/input helpers.
         SDL.setContext(this)
         SDLControllerManager.nativeSetupJNI()
         SDLControllerManager.initialize()
@@ -109,10 +115,12 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun initializeCore(dataRoot:File,biosDir:File){if(initialized||isFinishing)return;try{
-        trace("before-native-load");NativeApp.attachContext(this);if(!NativeApp.isNativeReady())error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+        status.text="PS2 • native load"
+        trace("before-native-load")
+        if(!NativeApp.loadNative(this)) error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+        trace("after-native-load")
         initializeSdlBridge()
         status.text="PS2 • initialize";trace(if(biosOnly)"bios-only-before-initialize" else "before-initialize");NativeApp.initialize(dataRoot.absolutePath,biosDir.absolutePath,Build.VERSION.SDK_INT);trace(if(biosOnly)"bios-only-after-initialize" else "after-initialize")
-        // Match upstream Android bootstrap: leave renderer at Auto/default until VM creation.
         trace("renderer-auto-default")
         initialized=true;attachNativeSurfaceIfReady();maybeStartVm()
     }catch(t:Throwable){trace("init-error:${t.javaClass.simpleName}",false);Toast.makeText(this,"ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}",Toast.LENGTH_LONG).show();finish()}}
