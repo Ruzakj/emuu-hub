@@ -40,7 +40,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":ppssppEmbedded"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.documentfile:documentfile:1.1.0")
