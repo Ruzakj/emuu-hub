@@ -14,6 +14,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -117,6 +120,27 @@ jobs:
           cp -a /tmp/ppsspp-src/assets/. app/src/main/assets/PPSSPP/
           test -d app/src/main/assets/PPSSPP/lang
 
+      - name: Stage ARMSX2 Android PS2 runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-armsx2-android.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          test -n "$RUN_ID"
+          rm -rf /tmp/armsx2-ref /tmp/armsx2-apk
+          mkdir -p /tmp/armsx2-ref /tmp/armsx2-apk app/src/main/jniLibs/arm64-v8a app/src/main/assets/ARMSX2
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ARMSX2-Android-Reference-APK -D /tmp/armsx2-ref
+          APK=$(find /tmp/armsx2-ref -type f -name '*.apk' | head -1)
+          test -n "$APK"
+          unzip -j "$APK" 'lib/arm64-v8a/libemucore_4k.so' 'lib/arm64-v8a/liblibrashader_capi.so' -d app/src/main/jniLibs/arm64-v8a
+          rm -rf /tmp/armsx2-assets app/src/main/assets/ARMSX2
+          mkdir -p /tmp/armsx2-assets app/src/main/assets/ARMSX2
+          unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
+          cp -a /tmp/armsx2-assets/assets/resources/. app/src/main/assets/ARMSX2/
+          test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
+          test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
+          test -s app/src/main/assets/ARMSX2/GameIndex.yaml
+
       - name: Verify emulator cores
         run: |
           test -s app/src/main/jniLibs/arm64-v8a/libmgba_core.so
@@ -124,6 +148,8 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
+          test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
+          test -s app/src/main/jniLibs/arm64-v8a/liblibrashader_capi.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -138,6 +164,9 @@ jobs:
         run: |
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libemuhost.so'
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libppsspp_core.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libemucore_4k.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/liblibrashader_capi.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/ARMSX2/GameIndex.yaml'
           ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'libppsspp_jni.so'
           ! unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'org/ppsspp/ppsspp/PpssppActivity'
 
