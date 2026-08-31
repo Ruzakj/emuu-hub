@@ -71,6 +71,14 @@ class MainActivity : Activity() {
         refreshAllFolders(false)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::status.isInitialized) {
+            val bios = Ps2BiosActivity.selectedBios(this)
+            if (bios != null && status.text.toString().startsWith("PS2 BIOS")) status.text = "PS2 BIOS ready • ${bios.name}"
+        }
+    }
+
     private fun ensureDefaultPspResolution(){
         val value=prefs.getString(KEY_PSP_RESOLUTION,null)
         if(value !in PSP_RES_VALUES){prefs.edit().putString(KEY_PSP_RESOLUTION,"960x544").apply();writePspResolution("960x544")} else writePspResolution(value!!)
@@ -159,7 +167,16 @@ class MainActivity : Activity() {
         val hsv=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER}
         val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
         listOf(Triple("PSP","PPSSPP","2×"),Triple("PS1","PCSX","ARM"),Triple("PS2","ARMSX2","VK"),Triple("GBA","mGBA","CORE"),Triple("NES","FCEUmm","CORE"),Triple("SNES","Snes9x","CORE"),Triple("SWITCH","Eden","EXT")).forEachIndexed{index,item->
-            val chip=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(14),dp(10),dp(16),dp(10));background=rounded(if(index==0)0xFF101010.toInt() else 0xFF080808.toInt(),16,if(index==0)0xFF333333.toInt() else 0xFF1D1D1D.toInt());addView(textView(item.first,12f,0xFFFFFFFF.toInt(),true));addView(textView("${item.second} • ${item.third}",9.5f,0xFF777777.toInt()),LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(3)})}
+            val chip=LinearLayout(this).apply{
+                orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(14),dp(10),dp(16),dp(10));background=rounded(if(index==0)0xFF101010.toInt() else 0xFF080808.toInt(),16,if(index==0)0xFF333333.toInt() else 0xFF1D1D1D.toInt());addView(textView(item.first,12f,0xFFFFFFFF.toInt(),true));addView(textView("${item.second} • ${item.third}",9.5f,0xFF777777.toInt()),LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(3)})
+                if(item.first=="PS2"){
+                    isClickable=true;isFocusable=true
+                    setOnClickListener{
+                        status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • tap to change" else "PS2 BIOS setup • pilih BIOS dulu"
+                        startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))
+                    }
+                }
+            }
             row.addView(chip,LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(60)).apply{if(index>0)leftMargin=dp(8)})
         }
         hsv.addView(row,ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(60)));return hsv
@@ -217,8 +234,17 @@ class MainActivity : Activity() {
     private fun systemColor(e:String)=when(e){"xci","nsp","nro"->0xFF243847.toInt();"bin","cue","chd","iso","ecm"->0xFF3A3347.toInt();"cso"->0xFF243C4B.toInt();"gba","gb","gbc"->0xFF2D4138.toInt();"nes"->0xFF493237.toInt();"sfc","smc"->0xFF39364A.toInt();in ARCHIVES->0xFF3A3A3A.toInt();else->0xFF303030.toInt()}
 
     private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
-    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->copyAndLaunchPs2(uri,name)}}.setNegativeButton("Batal",null).show()}
-    private fun showChdChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"chd","pcsx") else copyAndLaunchPs2(uri,name)}.setNegativeButton("Batal",null).show()}
+    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}
+    private fun showChdChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"chd","pcsx") else launchPs2OrSetup(uri,name)}.setNegativeButton("Batal",null).show()}
+
+    private fun launchPs2OrSetup(uri:Uri,name:String){
+        if(Ps2BiosActivity.selectedBios(this)==null){
+            status.text="PS2 BIOS belum siap"
+            AlertDialog.Builder(this).setTitle("PS2 BIOS diperlukan").setMessage("Pilih BIOS PS2 dulu. Setelah status BIOS READY, baru pilih ISO/CHD PS2.").setPositiveButton("SETUP BIOS"){_,_->startActivity(Intent(this,Ps2BiosActivity::class.java))}.setNegativeButton("Batal",null).show()
+            return
+        }
+        copyAndLaunchPs2(uri,name)
+    }
 
     private fun openArchive(uri:Uri,name:String){
         status.text="Preparing compressed ROM • $name"
@@ -237,6 +263,7 @@ class MainActivity : Activity() {
     private fun launchExtractedRom(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
         when(rom.ext){
             "iso"->showExtractedIsoChooser(session,rom)
+            "chd"->showExtractedChdChooser(session,rom)
             "cso"->showExtractedPspResolutionChooser(session,rom)
             "ecm"->decodeExtractedEcm(session,rom)
             else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)
@@ -244,9 +271,30 @@ class MainActivity : Activity() {
     }
 
     private fun showExtractedIsoChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
-        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP")){_,which->
-            if(which==0)launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root) else showExtractedPspResolutionChooser(session,rom)
+        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->
+            when(which){
+                0->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
+                1->showExtractedPspResolutionChooser(session,rom)
+                else->launchExtractedPs2OrSetup(session,rom)
+            }
         }.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
+    }
+
+    private fun showExtractedChdChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
+        AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->
+            if(which==0)launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root) else launchExtractedPs2OrSetup(session,rom)
+        }.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
+    }
+
+    private fun launchExtractedPs2OrSetup(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
+        if(Ps2BiosActivity.selectedBios(this)==null){
+            session.root.deleteRecursively()
+            Toast.makeText(this,"Setup BIOS PS2 dulu dari kartu PS2 di Console Hub.",Toast.LENGTH_LONG).show()
+            startActivity(Intent(this,Ps2BiosActivity::class.java))
+            return
+        }
+        pendingArchiveSession=session.root
+        startActivityForResult(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",rom.file.absolutePath).putExtra("romName",rom.displayName),REQUEST_ARCHIVE_GAME)
     }
 
     private fun showExtractedPspResolutionChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
@@ -287,6 +335,12 @@ class MainActivity : Activity() {
     private fun launchInternalFile(file:File,core:String,name:String){startActivity(Intent(this,GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("coreId",core).putExtra("romName",name))}
     private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){try{status.text="Opening $name...";val dir=File(cacheDir,"roms").apply{mkdirs()};val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_");val out=File(dir,safe);contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("ROM tidak dapat dibaca");launchInternalFile(out,forcedCore?:coreIdFor(ext),name)}catch(e:Exception){status.text="Failed to open ROM • ${e.message}"}}
     private fun copyAndLaunchPs2(uri:Uri,name:String){
+        if(Ps2BiosActivity.selectedBios(this)==null){
+            status.text="PS2 BIOS belum siap"
+            Toast.makeText(this,"Setup BIOS PS2 dulu.",Toast.LENGTH_LONG).show()
+            startActivity(Intent(this,Ps2BiosActivity::class.java))
+            return
+        }
         status.text="Preparing PS2 • $name"
         scanExecutor.execute{
             try{
