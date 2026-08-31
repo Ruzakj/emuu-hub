@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build-armsx2-android:
-    name: ARMSX2 Android arm64
+    name: ARMSX2 Android arm64 lean
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
@@ -33,52 +33,67 @@ jobs:
       - name: Install Android NDK and CMake
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "ndk;28.2.13676358" "cmake;3.31.6"
+          sdkmanager "platforms;android-35" "platforms;android-37" "ndk;28.2.13676358" "cmake;3.31.6"
 
-      - name: Checkout ARMSX2 upstream
+      - name: Checkout pinned ARMSX2 source
         run: |
-          git clone --depth 1 https://github.com/ARMSX2/ARMSX2.git /tmp/armsx2
+          set -euxo pipefail
+          git clone https://github.com/ARMSX2/ARMSX2.git /tmp/armsx2
+          git -C /tmp/armsx2 checkout 1024c3538ee2ff27fc0f9d5272d76202b8b1c03b
           git -C /tmp/armsx2 rev-parse HEAD | tee /tmp/armsx2-source-sha.txt
+
+      - name: Make core embeddable and remove librashader load-time dependency
+        run: |
+          set -euxo pipefail
+          CMAKE=/tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt')
+          s=p.read_text()
+          old='add_subdirectory(3rdparty/librashader)'
+          if old not in s:
+              raise SystemExit('librashader hook not found')
+          s=s.replace(old, 'set(ARMSX2_HAVE_LIBRASHADER OFF)\nmessage(STATUS "Emu Hub lean build: librashader disabled")', 1)
+          p.write_text(s)
+          PY
+          grep -n 'lean build: librashader disabled' "$CMAKE"
 
       - name: Fetch shaderc dependencies
         working-directory: /tmp/armsx2/platforms/android
         run: python3 app/src/main/cpp/3rdparty/shaderc/utils/git-sync-deps
 
-      - name: Install Rust Android target
-        run: rustup target add aarch64-linux-android
-
-      - name: Build ARMSX2 Android release
+      - name: Build lean ARMSX2 Android release
         working-directory: /tmp/armsx2/platforms/android
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g
-        run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
+        run: ./gradlew :app:assembleGithubRelease --stacktrace --no-daemon
 
-      - name: Collect Emu Hub PS2 runtime bundle
+      - name: Collect complete lean runtime
         run: |
           set -euxo pipefail
           APK=$(find /tmp/armsx2/platforms/android/app/build/outputs/apk -type f -name '*.apk' | head -1)
           test -n "$APK"
-          rm -rf /tmp/armsx2-runtime
-          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2
+          rm -rf /tmp/armsx2-runtime /tmp/armsx2-assets
+          mkdir -p /tmp/armsx2-runtime/jniLibs/arm64-v8a /tmp/armsx2-runtime/assets/ARMSX2 /tmp/armsx2-assets
 
-          unzip -j "$APK" \
-            'lib/arm64-v8a/libemucore_4k.so' \
-            'lib/arm64-v8a/liblibrashader_capi.so' \
-            'lib/arm64-v8a/libc++_shared.so' \
-            -d /tmp/armsx2-runtime/jniLibs/arm64-v8a
-
+          unzip -q "$APK" 'lib/arm64-v8a/*.so' -d /tmp/armsx2-libs
+          cp -a /tmp/armsx2-libs/lib/arm64-v8a/. /tmp/armsx2-runtime/jniLibs/arm64-v8a/
           unzip -q "$APK" 'assets/resources/*' -d /tmp/armsx2-assets
           cp -a /tmp/armsx2-assets/assets/resources/. /tmp/armsx2-runtime/assets/ARMSX2/
           cp /tmp/armsx2-source-sha.txt /tmp/armsx2-runtime/SOURCE_SHA.txt
 
-          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so
-          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/liblibrashader_capi.so
-          test -s /tmp/armsx2-runtime/jniLibs/arm64-v8a/libc++_shared.so
+          CORE=/tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so
+          test -s "$CORE"
           test -s /tmp/armsx2-runtime/assets/ARMSX2/GameIndex.yaml
 
-          echo 'Native dependencies:'
-          readelf -d /tmp/armsx2-runtime/jniLibs/arm64-v8a/libemucore_4k.so | grep NEEDED || true
-          du -sh /tmp/armsx2-runtime
+          echo '=== emucore NEEDED ==='
+          readelf -d "$CORE" | grep NEEDED || true
+          if readelf -d "$CORE" | grep -q 'liblibrashader_capi.so'; then
+            echo 'ERROR: lean core still depends on librashader' >&2
+            exit 1
+          fi
+          echo 'Lean runtime files:'
+          find /tmp/armsx2-runtime/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
 
       - name: Upload Emu Hub PS2 runtime bundle
         uses: actions/upload-artifact@v4
