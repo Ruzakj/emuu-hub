@@ -1,14 +1,32 @@
 package com.ric.emuhub
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
 import android.widget.Toast
 import java.io.File
+import javax.microedition.util.ContextHolder
+import org.acra.ACRA
+import org.acra.config.CoreConfigurationBuilder
 
 class EmuHubApp : Application() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+
+        // JL-Mod normally performs this work from EmulatorApplication.attachBaseContext().
+        // Emu Hub embeds the runtime as an AAR, so initialize the runtime before any
+        // Config/MicroActivity static initializer can run, including in the :midlet process.
+        runCatching { ContextHolder.init(this) }
+        runCatching {
+            if (!ACRA.isACRASenderServiceProcess()) {
+                ACRA.init(this, CoreConfigurationBuilder().withParallel(false))
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
-        runCatching { javax.microedition.util.ContextHolder.init(this) }
+        runCatching { ContextHolder.init(this) }
 
         runCatching { StoragePaths.ensureLayout(this) }
 
