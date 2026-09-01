@@ -71,9 +71,45 @@ jobs:
               1,
           )
           cmake.write_text(s)
+
+          # SDL3 contributes JNI_OnLoad to libemucore. In the standalone SDL
+          # Android shell it eagerly RegisterNatives() against SDLActivity,
+          # SDLInputConnection and SDLAudioManager. Emu Hub intentionally does
+          # not use SDLActivity, so those registrations can leave a pending JNI
+          # exception and ART aborts while System.loadLibrary() is still inside
+          # JNI_OnLoad. Keep the JavaVM setup, but skip the standalone-shell
+          # registration table. Exported JNI functions remain available for the
+          # small controller bridge used by Emu Hub.
+          candidates = list(Path('/tmp/armsx2').rglob('SDL_android.c'))
+          if not candidates:
+              raise SystemExit('SDL_android.c not found')
+          patched = 0
+          for p in candidates:
+              t = p.read_text(errors='ignore')
+              if 'JNI_OnLoad' not in t or 'register_methods(env, "org/libsdl/app/SDLActivity"' not in t:
+                  continue
+              lines = t.splitlines()
+              out = []
+              removed = 0
+              for line in lines:
+                  if 'register_methods(env, "org/libsdl/app/' in line:
+                      out.append('    /* Emu Hub embedded core: standalone SDL Java registration intentionally skipped. */')
+                      removed += 1
+                  else:
+                      out.append(line)
+              if removed < 3:
+                  raise SystemExit(f'Unexpected SDL JNI registration layout in {p}: removed={removed}')
+              p.write_text('\n'.join(out) + '\n')
+              print(f'Patched SDL JNI_OnLoad registration in {p} ({removed} tables skipped)')
+              patched += 1
+          if patched == 0:
+              raise SystemExit('No SDL JNI_OnLoad registration block patched')
           PY
           grep -n 'compileSdk = 36\|targetSdk = 36' /tmp/armsx2/platforms/android/app/build.gradle.kts
           grep -n 'lean build: librashader disabled' /tmp/armsx2/platforms/android/app/src/main/cpp/CMakeLists.txt
+          SDL_ANDROID=$(find /tmp/armsx2 -type f -name SDL_android.c | head -1)
+          test -n "$SDL_ANDROID"
+          grep -n 'Emu Hub embedded core' "$SDL_ANDROID"
 
       - name: Fetch shaderc dependencies
         working-directory: /tmp/armsx2/platforms/android
@@ -112,6 +148,9 @@ jobs:
             echo 'ERROR: lean core still depends on librashader' >&2
             exit 1
           fi
+
+          echo '=== JNI_OnLoad symbol ==='
+          nm -D "$CORE" | grep ' JNI_OnLoad$' || true
 
           echo '=== packaged native libraries ==='
           find /tmp/armsx2-runtime/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
