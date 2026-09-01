@@ -18,7 +18,9 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -42,7 +44,7 @@ class Ps2BiosActivity : Activity() {
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK
         val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL;setPadding(dp(24),dp(24),dp(24),dp(24));setBackgroundColor(Color.BLACK)}
         root.addView(TextView(this).apply{text="PS2 BIOS DIAGNOSTIC";textSize=25f;setTextColor(Color.WHITE);setTypeface(typeface,Typeface.BOLD)})
-        root.addView(TextView(this).apply{text="Tidak tebak BIOS lagi. Halaman ini sekarang baca page-size, core yang dipilih, dan alasan proses :ps2 mati dari Android.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
+        root.addView(TextView(this).apply{text="Tidak tebak BIOS lagi. Halaman ini baca page-size, core yang dipilih, dan tombstone native proses :ps2.";textSize=13f;setTextColor(0xFF8C8C8C.toInt());gravity=Gravity.CENTER},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
 
         state=TextView(this).apply{textSize=13f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF0A0A0A.toInt(),18,0xFF252525.toInt())}
         root.addView(state,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(18)})
@@ -50,7 +52,7 @@ class Ps2BiosActivity : Activity() {
         nativeState=TextView(this).apply{textSize=12f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF071019.toInt(),18,0xFF17344A.toInt())}
         root.addView(nativeState,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
 
-        crashState=TextView(this).apply{textSize=12f;gravity=Gravity.CENTER;setPadding(dp(16),dp(14),dp(16),dp(14));background=rounded(0xFF120808.toInt(),18,0xFF402020.toInt())}
+        crashState=TextView(this).apply{textSize=11f;gravity=Gravity.CENTER;setPadding(dp(14),dp(14),dp(14),dp(14));background=rounded(0xFF120808.toInt(),18,0xFF402020.toInt())}
         root.addView(crashState,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(10)})
 
         root.addView(Button(this).apply{text="PILIH / GANTI BIOS";isAllCaps=false;setTextColor(Color.WHITE);background=rounded(0xFF151515.toInt(),16,0xFF303030.toInt());setOnClickListener{chooseBios()}},LinearLayout.LayoutParams(-1,dp(52)).apply{topMargin=dp(14)})
@@ -82,9 +84,16 @@ class Ps2BiosActivity : Activity() {
         if(stage.isNullOrBlank()){val trace=getSharedPreferences("ps2_runtime_trace",MODE_PRIVATE);stage=trace.getString("last_crash_stage",null);time=trace.getLong("last_crash_time",0L)}
 
         val exit=latestPs2Exit()
+        val tombstone=exit?.let{readNativeTombstone(it)}
         val exitText=if(exit==null)"ANDROID EXIT: belum ada data" else {
             val whenText=SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(exit.timestamp))
-            "ANDROID EXIT: ${reasonName(exit.reason)} (${exit.reason})\nSTATUS: ${exit.status} • $whenText\nDESC: ${exit.description ?: "-"}"
+            buildString{
+                append("ANDROID EXIT: ${reasonName(exit.reason)} (${exit.reason})\n")
+                append("STATUS: ${exit.status} • $whenText\n")
+                append("DESC: ${exit.description ?: "-"}")
+                if(!tombstone.isNullOrBlank())append("\n\nNATIVE TOMBSTONE\n$tombstone")
+                else append("\n\nNATIVE TOMBSTONE\ntrace unavailable")
+            }
         }
         if(stage.isNullOrBlank()){crashState.text="LAST NATIVE STAGE\nBelum ada data tersimpan.\n\n$exitText";crashState.setTextColor(0xFF9A9A9A.toInt())}
         else {val whenText=if(time>0L)SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(time)) else "-";crashState.text="LAST NATIVE STAGE\n$stage\n$whenText\n\n$exitText";crashState.setTextColor(0xFFFFB4B4.toInt())}
@@ -96,6 +105,23 @@ class Ps2BiosActivity : Activity() {
             val am=getSystemService(ActivityManager::class.java)
             am.getHistoricalProcessExitReasons(packageName,0,12).firstOrNull{it.processName=="$packageName:ps2"}
         }.getOrNull()
+    }
+
+    private fun readNativeTombstone(exit:ApplicationExitInfo):String?{
+        if(Build.VERSION.SDK_INT<31)return null
+        return runCatching{
+            exit.traceInputStream?.use{stream->
+                BufferedReader(InputStreamReader(stream)).use{reader->
+                    val lines=reader.readLines()
+                    val interesting=lines.filter{line->
+                        val s=line.trim()
+                        s.contains("signal ",true)||s.contains("Abort message",true)||s.contains("backtrace",true)||
+                        s.matches(Regex("#\\d{2}.*"))||s.contains("libemucore",true)||s.contains("Fatal signal",true)
+                    }
+                    (if(interesting.isNotEmpty())interesting else lines).take(18).joinToString("\n").take(4200)
+                }
+            }
+        }.getOrNull()?.takeIf{it.isNotBlank()}
     }
 
     private fun reasonName(reason:Int)=when(reason){
