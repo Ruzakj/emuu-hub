@@ -232,16 +232,17 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
         if (!biosOnly) {
             trace("before-z9x-performance-profile")
-            runCatching { NativeApp.setAffinityMode(0) }
+            val profile = Ps2Settings.load(this)
+            runCatching { NativeApp.setAffinityMode(profile.affinity) }
             runCatching { NativeApp.renderVulkan() }
-            runCatching { NativeApp.renderUpscalemultiplier(PS2_UPSCALE) }
+            runCatching { NativeApp.renderUpscalemultiplier(profile.upscale) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", profile.mtvu.toString()) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuFlagHack", "bool", "true") }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-2") }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", profile.eeRate.toString()) }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", profile.eeSkip.toString()) }
   // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
   runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", "false") }
   // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.

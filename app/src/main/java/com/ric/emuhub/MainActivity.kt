@@ -141,10 +141,11 @@ class MainActivity : Activity() {
         val quickGrid=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         val quickTop=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
         quickTop.addView(actionTile("＋","ADD FOLDER","Scan a ROM folder") { chooseRomFolder() },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(5)})
-        quickTop.addView(actionTile("PS2","BIOS","Setup / test PS2 BIOS") {
-            status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • open diagnostic" else "PS2 BIOS setup • pilih BIOS dulu"
-            startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))
+        quickTop.addView(actionTile("PS2","SETTINGS","Manual tuning / BIOS") {
+            startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java))
         },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})
+        /* legacy BIOS entry is now inside PS2 Settings */
+        /* 
         quickGrid.addView(quickTop,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(104)))
         val quickBottom=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
         quickBottom.addView(actionTile("↻","REFRESH","Rescan library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(5)})
