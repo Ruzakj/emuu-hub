@@ -103,7 +103,7 @@ jobs:
               <uses-permission android:name="android.permission.INTERNET" />
               <application>
                   <activity android:name="ru.playsoftware.j2meloader.config.ConfigActivity" android:exported="false" android:windowSoftInputMode="stateHidden" />
-                  <activity android:name="javax.microedition.shell.MicroActivity" android:exported="false" android:theme="@style/AppTheme.NoActionBar" android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode" android:process=":midlet" />
+                  <activity android:name="javax.microedition.shell.MicroActivity" android:exported="false" android:theme="@style/AppTheme.NoActionBar" android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode" />
                   <activity android:name="ru.playsoftware.j2meloader.settings.SettingsActivity" android:exported="false" />
                   <activity android:name="ru.playsoftware.j2meloader.settings.KeyMapperActivity" android:exported="false" />
                   <activity android:name="ru.playsoftware.j2meloader.config.ProfilesActivity" android:exported="false" />
@@ -152,6 +152,6 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/libs/jlmod-runtime.aar app/libs/jlmod-dexlib.aar app/src/main/java/com/ric/emuhub/MainActivity.kt
-          git commit -m "Rebuild JL-Mod runtime with Kotlin 2.0.21" || exit 0
+          git commit -m "Run embedded J2ME runtime in Emu Hub process" || exit 0
           git pull --rebase origin main
           git push
