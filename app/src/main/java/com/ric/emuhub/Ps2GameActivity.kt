@@ -35,6 +35,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
+        private const val PS2_UPSCALE = 1.5f
 
         private const val PAD_L_UP = 110
         private const val PAD_L_RIGHT = 111
@@ -119,7 +120,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         })
     }
 
-    /** True analog touch stick: circular base + freely moving knob, not four digital buttons. */
     private inner class AnalogStickView : View(this@Ps2GameActivity) {
         private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(105, 24, 24, 24); style = Paint.Style.FILL }
         private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat() }
@@ -180,21 +180,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)
             addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)
             addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 48), Gravity.TOP or Gravity.END, right = 64, top = 8, w = 48, h = 40)
-
-            // D-pad remains digital, as on a real DualShock 2.
             addControl(root, control("▲", KeyEvent.KEYCODE_DPAD_UP), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 126)
             addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
             addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
             addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
-
-            // Circular left analog stick with continuous strength/direction.
             addControl(root, AnalogStickView(), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
-
             addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
             addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
             addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
             addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72)
-
             addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -62, bottom = 22, w = 76, h = 36)
             addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -62, bottom = 22, w = 76, h = 36)
         }
@@ -203,9 +197,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
     private fun sendPad(keyCode: Int, pressed: Boolean, analogForce: Int = 0) {
         if (!initialized) return
-        val force = if (pressed && keyCode >= 110) {
-            if (analogForce > 0) analogForce else (90f * 32766f / 100f).toInt()
-        } else 0
+        val force = if (pressed && keyCode >= 110) { if (analogForce > 0) analogForce else (90f * 32766f / 100f).toInt() } else 0
         runCatching { NativeApp.setPadButton(keyCode, force, pressed) }
     }
 
@@ -240,14 +232,10 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
         if (!biosOnly) {
             trace("before-z9x-performance-profile")
-            // Snapdragon 6 Gen 1: keep EE/VU/GS on the A78 performance cluster.
             runCatching { NativeApp.setAffinityMode(7) }
             runCatching { NativeApp.renderVulkan() }
-            runCatching { NativeApp.renderUpscalemultiplier(1.0f) }
+            runCatching { NativeApp.renderUpscalemultiplier(PS2_UPSCALE) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
-
-            // Timing-safe speedhacks: enable MTVU + idle/INTC/VU optimizations, but avoid
-            // EE underclock and VU cycle stealing so God Hand does not gain artificial slow-motion.
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
@@ -255,7 +243,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "0") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
             runCatching { NativeApp.commitSettings() }
-
             runCatching { NativeApp.setAudioVolume(100) }
             @Suppress("DEPRECATION") val hz = windowManager.defaultDisplay.refreshRate
             if (hz > 0f) runCatching { NativeApp.setDisplayRefreshRate(hz) }
@@ -268,7 +255,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1.5x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
@@ -291,24 +278,19 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (initialized && event.repeatCount == 0 && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) {
-            sendPad(keyCode, true); return true
-        }
+        if (initialized && event.repeatCount == 0 && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) { sendPad(keyCode, true); return true }
         if (keyCode == KeyEvent.KEYCODE_BACK) { finish(); return true }
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (initialized && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) {
-            sendPad(keyCode, false); return true
-        }
+        if (initialized && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) { sendPad(keyCode, false); return true }
         return super.onKeyUp(keyCode, event)
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) { surfaceReady = true; if (initialized) runCatching { attachNativeSurfaceIfReady() }; maybeStartVm() }
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) { surfaceReady = true; surfaceWidth = width; surfaceHeight = height; if (initialized) { if (!nativeSurfaceAttached) runCatching { attachNativeSurfaceIfReady() } else runCatching { NativeApp.onNativeSurfaceChanged(holder.surface, width, height) } }; maybeStartVm() }
     override fun surfaceDestroyed(holder: SurfaceHolder) { surfaceReady = false; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false } }
-
     override fun onPause() { if (initialized && vmStarted.get() && !shuttingDown.get()) { runCatching { NativeApp.pause() }; runCatching { NativeApp.flushShaderCache() } }; super.onPause() }
     override fun onResume() { super.onResume(); if (initialized && vmStarted.get() && !shuttingDown.get()) runCatching { NativeApp.resume() } }
 
