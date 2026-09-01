@@ -9,6 +9,8 @@ class EmuHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        runCatching { StoragePaths.ensureLayout(this) }
+
         // Ps2GameActivity runs in the dedicated :ps2 process. Never clean ps2roms from that
         // process: MainActivity has just copied the selected ISO/CHD there immediately before
         // starting :ps2, so deleting it here causes the intermittent "PS2 ROM tidak ditemukan"
