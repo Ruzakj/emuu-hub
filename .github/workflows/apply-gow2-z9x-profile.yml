@@ -1,0 +1,36 @@
+name: Apply God of War II Z9x Profile
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-gow2-z9x-profile.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply conservative EE underclock for heavy PS2 titles
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s = p.read_text()
+          old = 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "0")'
+          new = 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-1")'
+          if old not in s:
+              raise SystemExit('Expected EECycleRate baseline not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('PS2 • Vulkan 2x • PERF CORES', 'PS2 • Vulkan 2x • Z9X HEAVY', 1)
+          p.write_text(s)
+          PY
+      - name: Commit profile
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
+          git commit -m 'Tune PS2 2x heavy-game performance for Z9x'
+          git push
