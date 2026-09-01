@@ -240,7 +240,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuFlagHack", "bool", "true") }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "0") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-1") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
             runCatching { NativeApp.commitSettings() }
             runCatching { NativeApp.setAudioVolume(100) }
@@ -255,7 +255,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • Z9X HEAVY"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
