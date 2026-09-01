@@ -1,6 +1,8 @@
 package com.ric.emuhub
 
 import android.content.Context
+import java.io.File
+import java.util.Properties
 
 data class Ps2Profile(
     val preset: String,
@@ -11,26 +13,53 @@ data class Ps2Profile(
     val affinity: Int
 )
 
+/**
+ * PS2 runs in the isolated :ps2 Android process. Do not use a cached
+ * SharedPreferences instance for live tuning: the main process and :ps2 can
+ * otherwise observe different cached values. A tiny properties file in the
+ * app data directory is read fresh every time a PS2 VM starts.
+ */
 object Ps2Settings {
-    private const val PREFS = "ps2_manual_settings"
+    private const val FILE_NAME = "ps2-manual-settings.properties"
+
+    private fun file(context: Context) = File(context.filesDir, FILE_NAME)
 
     fun load(context: Context): Ps2Profile {
-        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val props = Properties()
+        runCatching {
+            val f = file(context)
+            if (f.isFile) f.inputStream().buffered().use { props.load(it) }
+        }
         return Ps2Profile(
-            p.getString("preset", "Auto Z9x") ?: "Auto Z9x",
-            p.getFloat("upscale", 2.0f),
-            p.getInt("eeRate", -2),
-            p.getInt("eeSkip", 0),
-            p.getBoolean("mtvu", true),
-            p.getInt("affinity", 0)
+            preset = props.getProperty("preset", "Auto Z9x"),
+            upscale = props.getProperty("upscale", "2.0").toFloatOrNull()?.coerceIn(1f, 3f) ?: 2f,
+            eeRate = props.getProperty("eeRate", "-2").toIntOrNull()?.coerceIn(-3, 0) ?: -2,
+            eeSkip = props.getProperty("eeSkip", "0").toIntOrNull()?.coerceIn(0, 2) ?: 0,
+            mtvu = props.getProperty("mtvu", "true").toBooleanStrictOrNull() ?: true,
+            affinity = if (props.getProperty("affinity", "0").toIntOrNull() == 7) 7 else 0
         )
     }
 
     fun save(context: Context, v: Ps2Profile) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("preset", v.preset).putFloat("upscale", v.upscale)
-            .putInt("eeRate", v.eeRate).putInt("eeSkip", v.eeSkip)
-            .putBoolean("mtvu", v.mtvu).putInt("affinity", v.affinity).apply()
+        val props = Properties().apply {
+            setProperty("preset", v.preset)
+            setProperty("upscale", v.upscale.toString())
+            setProperty("eeRate", v.eeRate.toString())
+            setProperty("eeSkip", v.eeSkip.toString())
+            setProperty("mtvu", v.mtvu.toString())
+            setProperty("affinity", v.affinity.toString())
+        }
+        val target = file(context)
+        val tmp = File(target.parentFile, "$FILE_NAME.tmp")
+        runCatching {
+            target.parentFile?.mkdirs()
+            tmp.outputStream().buffered().use { props.store(it, "Emu Hub PS2 manual settings") }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+        }.getOrThrow()
     }
 
     fun preset(name: String): Ps2Profile = when (name) {
