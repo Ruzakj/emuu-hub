@@ -244,7 +244,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", profile.eeRate.toString()) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", profile.eeSkip.toString()) }
   // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
-  runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", "false") }
+  runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", (profile.affinity == 7).toString()) }
   // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.
   runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
   runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
@@ -266,7 +266,8 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • Z9X HEAVY"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        val activeProfile = Ps2Settings.load(this)
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan ${activeProfile.upscale}x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
