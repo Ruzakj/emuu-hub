@@ -119,9 +119,9 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git pull --rebase origin main || true
           git add j2me-build.log
           git commit -m "Capture JL-Mod integration build failure" || true
+          git pull --rebase origin main || true
           git push || true
           exit 1
       - name: Add Java console entry
@@ -142,7 +142,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git pull --rebase origin main
           git add app/libs/jlmod-runtime.aar app/libs/jlmod-dexlib.aar app/src/main/java/com/ric/emuhub/MainActivity.kt
           git commit -m "Embed JL-Mod runtime for J2ME" || exit 0
+          git pull --rebase origin main
           git push
