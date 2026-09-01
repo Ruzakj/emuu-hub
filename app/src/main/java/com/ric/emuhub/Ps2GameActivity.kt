@@ -59,6 +59,8 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private val vmStarted = AtomicBoolean(false)
     private val shuttingDown = AtomicBoolean(false)
     private var vmThread: Thread? = null
+    private var stateSlot = 0
+    private var stateSlotButton: Button? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -120,7 +122,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         })
     }
 
-    private inner class AnalogStickView : View(this@Ps2GameActivity) {
+    private inner class AnalogStickView(private val rightStick: Boolean = false) : View(this@Ps2GameActivity) {
         private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(105, 24, 24, 24); style = Paint.Style.FILL }
         private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat() }
         private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(175, 150, 150, 150); style = Paint.Style.FILL }
@@ -148,14 +150,24 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                     knobX = dx; knobY = dy
                     val nx = (dx / limit).coerceIn(-1f, 1f)
                     val ny = (dy / limit).coerceIn(-1f, 1f)
-                    sendAnalogPair(nx, PAD_L_LEFT, PAD_L_RIGHT)
-                    sendAnalogPair(ny, PAD_L_UP, PAD_L_DOWN)
+                    if (rightStick) {
+                        sendAnalogPair(nx, PAD_R_LEFT, PAD_R_RIGHT)
+                        sendAnalogPair(ny, PAD_R_UP, PAD_R_DOWN)
+                    } else {
+                        sendAnalogPair(nx, PAD_L_LEFT, PAD_L_RIGHT)
+                        sendAnalogPair(ny, PAD_L_UP, PAD_L_DOWN)
+                    }
                     invalidate()
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     knobX = 0f; knobY = 0f
-                    sendPad(PAD_L_LEFT, false); sendPad(PAD_L_RIGHT, false)
-                    sendPad(PAD_L_UP, false); sendPad(PAD_L_DOWN, false)
+                    if (rightStick) {
+                        sendPad(PAD_R_LEFT, false); sendPad(PAD_R_RIGHT, false)
+                        sendPad(PAD_R_UP, false); sendPad(PAD_R_DOWN, false)
+                    } else {
+                        sendPad(PAD_L_LEFT, false); sendPad(PAD_L_RIGHT, false)
+                        sendPad(PAD_L_UP, false); sendPad(PAD_L_DOWN, false)
+                    }
                     invalidate()
                 }
             }
@@ -184,13 +196,24 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
             addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
             addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
-            addControl(root, AnalogStickView(), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
+            addControl(root, AnalogStickView(false), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
+            addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 247, bottom = 166, w = 48, h = 36)
+            addControl(root, AnalogStickView(true), Gravity.BOTTOM or Gravity.END, right = 205, bottom = 28, w = 132, h = 132)
+            addControl(root, control("R3", KeyEvent.KEYCODE_BUTTON_THUMBR, 48), Gravity.BOTTOM or Gravity.END, right = 247, bottom = 166, w = 48, h = 36)
             addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
             addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
             addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
             addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72)
             addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -62, bottom = 22, w = 76, h = 36)
             addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -62, bottom = 22, w = 76, h = 36)
+
+            stateSlotButton = Button(this).apply {
+                text = "S0"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded()
+                setOnClickListener { stateSlot = (stateSlot + 1) % 10; text = "S$stateSlot" }
+            }
+            addControl(root, stateSlotButton!!, Gravity.TOP or Gravity.CENTER_HORIZONTAL, left = -82, top = 8, w = 50, h = 38)
+            addControl(root, Button(this).apply { text = "SAVE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { saveStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 8, w = 64, h = 38)
+            addControl(root, Button(this).apply { text = "LOAD"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { loadStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, right = -82, top = 8, w = 64, h = 38)
         }
         setContentView(root)
     }
@@ -208,6 +231,29 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         if (value < -dead) { sendPad(negativeKey, true, force); sendPad(positiveKey, false) }
         else if (value > dead) { sendPad(positiveKey, true, force); sendPad(negativeKey, false) }
         else { sendPad(negativeKey, false); sendPad(positiveKey, false) }
+    }
+
+    private fun saveStateNow() {
+        if (!initialized || biosOnly) return
+        val slot = stateSlot
+        Toast.makeText(this, "Saving state S$slot...", Toast.LENGTH_SHORT).show()
+        Thread({
+            val busy = runCatching { NativeApp.isMemcardBusy() }.getOrDefault(false)
+            val ok = if (busy) false else runCatching { NativeApp.saveStateToSlot(slot) }.getOrDefault(false)
+            runOnUiThread {
+                Toast.makeText(this, if (ok) "State S$slot saved" else if (busy) "Memory card busy — coba lagi setelah beberapa detik" else "Save state S$slot gagal", Toast.LENGTH_SHORT).show()
+            }
+        }, "ps2-save-state").start()
+    }
+
+    private fun loadStateNow() {
+        if (!initialized || biosOnly) return
+        val slot = stateSlot
+        Toast.makeText(this, "Loading state S$slot...", Toast.LENGTH_SHORT).show()
+        Thread({
+            val ok = runCatching { NativeApp.loadStateFromSlot(slot) }.getOrDefault(false)
+            runOnUiThread { Toast.makeText(this, if (ok) "State S$slot loaded" else "Tidak ada / gagal load state S$slot", Toast.LENGTH_SHORT).show() }
+        }, "ps2-load-state").start()
     }
 
     private fun prepareRuntime() {

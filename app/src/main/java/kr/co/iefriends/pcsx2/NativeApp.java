@@ -82,6 +82,9 @@ public final class NativeApp {
     public static native void flushShaderCache();
     public static native void setSetting(String section, String key, String type, String value);
     public static native void commitSettings();
+    public static native boolean saveStateToSlot(int slot);
+    public static native boolean loadStateFromSlot(int slot);
+    public static native boolean isMemcardBusy();
 
     public static void vmSetPaused(boolean value) { paused = value; }
     public static boolean isPaused() { return paused; }
