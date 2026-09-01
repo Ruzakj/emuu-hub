@@ -31,7 +31,7 @@ class Ps2BiosActivity : Activity() {
         private const val REQUEST_BIOS = 2301
         const val PREFS = "ps2"
         const val BIOS_PREF = "ps2_bios_name"
-        fun biosDir(activity: Activity): File = File(activity.filesDir,"ps2/bios").apply{mkdirs()}
+        fun biosDir(activity: Activity): File = StoragePaths.ps2BiosDir(activity)
         fun selectedBios(activity: Activity): File? { val dir=biosDir(activity);val p=activity.getSharedPreferences(PREFS,MODE_PRIVATE).getString(BIOS_PREF,null);if(!p.isNullOrBlank())File(dir,p).takeIf{validBios(it)}?.let{return it};return dir.listFiles()?.firstOrNull{validBios(it)} }
         fun validBios(file:File):Boolean=file.isFile && (file.length()==4L*1024*1024 || file.length()==2L*1024*1024)
     }

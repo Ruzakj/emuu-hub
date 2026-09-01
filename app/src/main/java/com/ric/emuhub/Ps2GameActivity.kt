@@ -213,7 +213,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun prepareRuntime() {
         Thread({ try {
             trace("preparing-resources")
-            val dataRoot = File(filesDir, "ps2").apply { mkdirs() }; val resourcesDir = File(dataRoot, "resources")
+            val dataRoot = StoragePaths.ps2Root(this); val resourcesDir = File(dataRoot, "resources")
             resourcesDir.deleteRecursively(); copyAssetTree("ARMSX2", resourcesDir)
             val biosDir = Ps2BiosActivity.biosDir(this)
             trace("resources-ready"); runOnUiThread { initializeCore(dataRoot, biosDir) }

@@ -47,10 +47,10 @@ class GameActivity : Activity() {
             "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; else -> "libmgba_core.so"
         }
         val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; else -> "mGBA" }
-        val systemRoot = File(filesDir, "system").apply { mkdirs() }
+        val systemRoot = StoragePaths.systemDir(this)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
-        val saveDir = File(filesDir, "saves").apply { mkdirs() }
-        stateFile = File(saveDir, "${coreId}_${safeStateKey(romName)}_slot0.state")
+        val saveDir = StoragePaths.savesDir(this)
+        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")
         if (!NativeBridge.init(applicationInfo.nativeLibraryDir + "/$coreFile", systemRoot.absolutePath, saveDir.absolutePath)) { showLoadError("$coreLabel core gagal inisialisasi."); return }
         if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)
         if (!NativeBridge.loadGame(rom)) { showLoadError("$coreLabel gagal memuat ${File(rom).name}."); return }
