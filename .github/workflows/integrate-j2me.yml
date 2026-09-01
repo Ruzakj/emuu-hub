@@ -29,8 +29,10 @@ jobs:
           sdkmanager "platforms;android-34" "ndk;22.1.7171670"
 
       - name: Build embedded JL-Mod AARs
+        id: jlbuild
+        continue-on-error: true
         run: |
-          set -euxo pipefail
+          set -uo pipefail
           rm -rf /tmp/jlmod
           git clone --recursive https://github.com/woesss/JL-Mod.git /tmp/jlmod
           cd /tmp/jlmod
@@ -47,6 +49,44 @@ jobs:
           p=Path('app/src/main/java/ru/playsoftware/j2meloader/config/Config.java')
           s=p.read_text()
           s=s.replace('String path = preferences.getString(PREF_EMULATOR_DIR, null);\n\t\tif (path == null) path = Environment.getExternalStorageDirectory() + "/" + appName;', 'String path = Environment.getExternalStorageDirectory() + "/Java";')
+          p.write_text(s)
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
+          s=s.replace('        applicationId = "ru.woesss.j2meloader"\n', '')
+          s=s.replace('        versionCode = 48\n', '')
+          s=s.replace('        versionName = "0.87.1"\n', '')
+          s=s.replace('        release {\n            isMinifyEnabled = true\n            isShrinkResources = true\n        }', '        release {\n            isMinifyEnabled = false\n        }')
+          s=s.replace('            applicationIdSuffix = ".debug"\n', '')
+          start=s.find('    signingConfigs.create("emulator") {')
+          if start >= 0:
+              end=s.find('\n    buildTypes {', start)
+              s=s[:start]+s[end:]
+          s=s.replace('            signingConfig = signingConfigs.getByName("emulator")\n', '')
+          s=s.replace('            versionNameSuffix = System.getenv("VERSION_SUFFIX")\n', '')
+          mid=s.find('        create("midlet") {')
+          if mid >= 0:
+              depth=0; i=mid
+              while i < len(s):
+                  if s[i]=='{': depth+=1
+                  elif s[i]=='}':
+                      depth-=1
+                      if depth==0:
+                          s=s[:mid]+s[i+1:]
+                          break
+                  i+=1
+          split=s.find('\n    splits.abi {')
+          if split >= 0:
+              end=s.find('\n    externalNativeBuild', split)
+              s=s[:split]+s[end:]
+          av=s.find('\n    applicationVariants.configureEach {')
+          if av >= 0:
+              end=s.find('\n}\n\nkotlin.compilerOptions', av)
+              s=s[:av]+s[end:]
           p.write_text(s)
           PY
 
@@ -67,69 +107,15 @@ jobs:
           </manifest>
           EOF
 
-          cat > app/build.gradle.kts <<'EOF'
-          import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-          plugins {
-              alias(libs.plugins.android.library)
-              alias(libs.plugins.kotlin.android)
-          }
-          android {
-              compileSdk = rootProject.extra["compileSdk"] as Int
-              ndkVersion = rootProject.extra["ndkVersion"] as String
-              namespace = "ru.playsoftware.j2meloader"
-              defaultConfig {
-                  minSdk = rootProject.extra["minSdk"] as Int
-                  resValue("string", "app_name", "Java")
-                  resValue("string", "app_center", "")
-                  resValue("string", "fingerprint", "")
-              }
-              buildFeatures { viewBinding = true; prefab = true; buildConfig = true }
-              buildTypes { release { isMinifyEnabled = false } }
-              flavorDimensions += "default"
-              productFlavors { create("emulator") { buildConfigField("boolean", "FULL_EMULATOR", "true") } }
-              externalNativeBuild.ndkBuild.path("src/main/cpp/Android.mk")
-              compileOptions { targetCompatibility = JavaVersion.VERSION_17; sourceCompatibility = JavaVersion.VERSION_17 }
-          }
-          kotlin.compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
-          dependencies {
-              implementation(projects.dexlib)
-              implementation(libs.androidx.activity.ktx)
-              implementation(libs.androidx.appcompat)
-              implementation(libs.androidx.arch.core.common)
-              implementation(libs.androidx.collection)
-              implementation(libs.androidx.concurrent.futures)
-              implementation(libs.androidx.constraintlayout)
-              implementation(libs.androidx.coordinatorlayout)
-              implementation(libs.androidx.core.ktx)
-              implementation(libs.androidx.documentfile)
-              implementation(libs.androidx.fragment.ktx)
-              implementation(libs.androidx.lifecycle.common)
-              implementation(libs.androidx.lifecycle.livedata.ktx)
-              implementation(libs.androidx.lifecycle.runtime.ktx)
-              implementation(libs.androidx.multidex)
-              implementation(libs.androidx.preference.ktx)
-              implementation(libs.androidx.recyclerview)
-              annotationProcessor(libs.androidx.room.compiler)
-              implementation(libs.androidx.room.runtime)
-              implementation(libs.androidx.room.rxjava2)
-              implementation(libs.androidx.transition)
-              annotationProcessor(libs.google.auto.service)
-              compileOnly(libs.google.auto.service.annotations)
-              implementation(libs.google.gson)
-              implementation(libs.google.material)
-              implementation(libs.google.oboe)
-              implementation(libs.acra.http)
-              implementation(libs.ambilwarna)
-              implementation(libs.donations)
-              implementation(libs.ffmpeg.mobile)
-              implementation(libs.filepicker)
-              implementation(libs.pngj)
-              implementation(libs.rx.android)
-          }
-          EOF
-
           chmod +x gradlew
-          ./gradlew :app:bundleEmulatorReleaseAar :dexlib:bundleReleaseAar --stacktrace
+          set +e
+          ./gradlew :app:bundleEmulatorReleaseAar :dexlib:bundleReleaseAar --stacktrace > "$GITHUB_WORKSPACE/j2me-build.log" 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            tail -n 400 "$GITHUB_WORKSPACE/j2me-build.log"
+            exit "$rc"
+          fi
           cd "$GITHUB_WORKSPACE"
           mkdir -p app/libs
           cp /tmp/jlmod/app/build/outputs/aar/app-emulator-release.aar app/libs/jlmod-runtime.aar
@@ -137,7 +123,18 @@ jobs:
           test -s app/libs/jlmod-runtime.aar
           test -s app/libs/jlmod-dexlib.aar
 
+      - name: Commit failure log
+        if: steps.jlbuild.outcome == 'failure'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add j2me-build.log
+          git commit -m "Capture JL-Mod integration build failure" || true
+          git push || true
+          exit 1
+
       - name: Add Java console entry
+        if: steps.jlbuild.outcome == 'success'
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -151,6 +148,7 @@ jobs:
           PY
 
       - name: Commit embedded runtime
+        if: steps.jlbuild.outcome == 'success'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
