@@ -1,0 +1,65 @@
+name: Apply Direct ROM Path Policy
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-direct-rom-path.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch MainActivity to launch uncompressed ROMs in place
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s = p.read_text()
+
+          old_import = 'import android.os.Bundle\nimport android.provider.OpenableColumns\n'
+          new_import = 'import android.os.Bundle\nimport android.os.Environment\nimport android.provider.DocumentsContract\nimport android.provider.OpenableColumns\n'
+          assert old_import in s
+          s = s.replace(old_import, new_import, 1)
+
+          anchor = '    private fun decodeAndLaunchEcm(uri:Uri,name:String){'
+          helper = '''    /** Resolve Storage Access Framework URIs to their real storage path.\n     * Normal game images are launched in place; only archives/transform formats use cache. */\n    private fun directGameFile(uri:Uri):File?{\n        if(uri.scheme=="file")return uri.path?.let(::File)?.takeIf{it.isFile&&it.canRead()}\n        if(uri.scheme!="content")return null\n        return runCatching{\n            if(uri.authority=="com.android.externalstorage.documents"&&DocumentsContract.isDocumentUri(this,uri)){\n                val id=DocumentsContract.getDocumentId(uri)\n                if(id.startsWith("raw:"))return@runCatching File(id.removePrefix("raw:")).takeIf{it.isFile&&it.canRead()}\n                val parts=id.split(':',limit=2)\n                if(parts.size==2){\n                    val base=if(parts[0].equals("primary",true))Environment.getExternalStorageDirectory() else File("/storage/${parts[0]}")\n                    return@runCatching File(base,parts[1]).takeIf{it.isFile&&it.canRead()}\n                }\n            }\n            null\n        }.getOrNull()\n    }\n\n    private fun launchDirectInternal(uri:Uri,name:String,ext:String,forcedCore:String?){\n        val file=directGameFile(uri)\n        if(file==null){\n            status.text="Direct ROM path unavailable"\n            Toast.makeText(this,"ROM harus berada di penyimpanan internal/SD yang bisa diakses langsung. File game tidak akan dicopy ke cache.",Toast.LENGTH_LONG).show()\n            return\n        }\n        status.text="Opening directly • $name"\n        launchInternalFile(file,forcedCore?:coreIdFor(ext),name)\n    }\n\n    private fun launchDirectPs2(uri:Uri,name:String){\n        if(Ps2BiosActivity.selectedBios(this)==null){\n            status.text="PS2 BIOS belum siap"\n            Toast.makeText(this,"Setup BIOS PS2 dulu.",Toast.LENGTH_LONG).show()\n            startActivity(Intent(this,Ps2BiosActivity::class.java))\n            return\n        }\n        val file=directGameFile(uri)\n        if(file==null){\n            status.text="PS2 direct path unavailable"\n            Toast.makeText(this,"ISO/CHD PS2 tidak dicopy ke cache. Simpan game di penyimpanan internal/SD lalu tambahkan foldernya ke Emu Hub.",Toast.LENGTH_LONG).show()\n            return\n        }\n        status.text="PS2 • direct storage • ARMSX2 Vulkan"\n        startActivity(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("romName",name))\n    }\n\n'''
+          assert anchor in s
+          s = s.replace(anchor, helper + anchor, 1)
+
+          old_internal = '    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){try{status.text="Opening $name...";val dir=File(cacheDir,"roms").apply{mkdirs()};val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_");val out=File(dir,safe);contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("ROM tidak dapat dibaca");launchInternalFile(out,forcedCore?:coreIdFor(ext),name)}catch(e:Exception){status.text="Failed to open ROM • ${e.message}"}}'
+          new_internal = '    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){launchDirectInternal(uri,name,ext,forcedCore)}'
+          assert old_internal in s
+          s = s.replace(old_internal, new_internal, 1)
+
+          start = s.index('    private fun copyAndLaunchPs2(uri:Uri,name:String){')
+          end = s.index('    private fun coreIdFor(ext:String)', start)
+          s = s[:start] + '    private fun copyAndLaunchPs2(uri:Uri,name:String){launchDirectPs2(uri,name)}\n' + s[end:]
+
+          p.write_text(s)
+
+      - name: Verify cache policy
+        run: |
+          grep -q 'private fun directGameFile' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          grep -q 'copyAndLaunchInternal.*launchDirectInternal' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          grep -q 'copyAndLaunchPs2.*launchDirectPs2' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          ! grep -q 'File(cacheDir,"roms")' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          ! grep -q 'File(cacheDir,"ps2roms")' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          grep -q 'ArchiveHelper.extract' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          grep -q 'File(cacheDir,"ecm")' app/src/main/java/com/ric/emuhub/MainActivity.kt
+
+      - name: Remove one-shot workflow and commit patch
+        run: |
+          rm .github/workflows/apply-direct-rom-path.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt .github/workflows/apply-direct-rom-path.yml
+          git commit -m "Launch uncompressed ROMs directly from storage"
+          git push
