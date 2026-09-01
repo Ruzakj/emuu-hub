@@ -5,62 +5,45 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
-import android.system.Os;
-import android.system.OsConstants;
 import android.view.Surface;
 
 import java.io.File;
-import java.lang.ref.WeakReference;
 
-/** ARMSX2 JNI bridge. Native loading is explicit so the host can isolate and diagnose dlopen. */
 public final class NativeApp {
+    private static volatile Context appContext;
+    private static volatile boolean loaded;
+    private static volatile String loadError;
+    private static volatile boolean paused;
+
     private NativeApp() {}
 
-    private static WeakReference<Context> contextRef;
-    private static volatile boolean paused;
-    private static volatile boolean loadAttempted;
-    public static volatile boolean hasNoNativeBinary = true;
-    public static volatile String nativeLoadError = "not loaded";
-
-    private static long getRuntimePageSize() {
+    public static boolean loadNative(Context context) {
+        if (loaded) return true;
+        appContext = context.getApplicationContext();
         try {
-            long pageSize = Os.sysconf(OsConstants._SC_PAGESIZE);
-            return pageSize > 0 ? pageSize : 4096;
-        } catch (Throwable ignored) {
-            return 4096;
-        }
-    }
-
-    private static String selectNativeLibraryName() {
-        return getRuntimePageSize() >= 16384 ? "emucore_16k" : "emucore_4k";
-    }
-
-    public static synchronized boolean loadNative(Context context) {
-        attachContext(context);
-        if (loadAttempted) return !hasNoNativeBinary;
-        loadAttempted = true;
-        final String libraryName = selectNativeLibraryName();
-        try {
-            System.loadLibrary(libraryName);
-            hasNoNativeBinary = false;
-            nativeLoadError = "";
+            long pageSize = 4096L;
+            try {
+                Class<?> os = Class.forName("android.system.Os");
+                Object value = os.getMethod("sysconf", int.class).invoke(null, 30);
+                if (value instanceof Long && ((Long) value) > 0) pageSize = (Long) value;
+            } catch (Throwable ignored) {}
+            String lib = pageSize >= 16384L ? "emucore_16k" : "emucore_4k";
+            System.loadLibrary(lib);
+            loaded = true;
+            loadError = null;
             return true;
-        } catch (UnsatisfiedLinkError e) {
-            hasNoNativeBinary = true;
-            nativeLoadError = "UnsatisfiedLinkError: " + String.valueOf(e.getMessage());
-            return false;
         } catch (Throwable t) {
-            hasNoNativeBinary = true;
-            nativeLoadError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
+            loadError = t.toString();
             return false;
         }
     }
 
-    public static boolean isNativeReady() { return !hasNoNativeBinary; }
-    public static void attachContext(Context context) { contextRef = new WeakReference<>(context.getApplicationContext()); }
-    public static Context getContext() { return contextRef == null ? null : contextRef.get(); }
+    public static String getNativeLoadError() { return loadError; }
+    public static String nativeLoadError = null;
 
-    public static native void initialize(String path, String biosFolder, int apiVer);
+    public static Context getContext() { return appContext; }
+
+    public static native void initialize(String dataPath, String biosPath, int apiVersion);
     public static native void onNativeSurfaceCreated();
     public static native void onNativeSurfaceChanged(Surface surface, int w, int h);
     public static native void onNativeSurfaceDestroyed();
@@ -85,6 +68,14 @@ public final class NativeApp {
     public static native boolean saveStateToSlot(int slot);
     public static native boolean loadStateFromSlot(int slot);
     public static native boolean isMemcardBusy();
+
+    // Real ARMSX2/PCSX2 runtime telemetry + speed controls. These symbols are
+    // implemented by the bundled native core; the Android UI only exposes them.
+    public static native float getFPS();
+    public static native float getVPS();
+    public static native float getEmuSpeedPercent();
+    public static native void setNominalSpeed(int percent);
+    public static native void speedhackLimitermode(int mode);
 
     public static void vmSetPaused(boolean value) { paused = value; }
     public static boolean isPaused() { return paused; }
