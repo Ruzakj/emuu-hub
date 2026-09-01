@@ -145,7 +145,6 @@ class MainActivity : Activity() {
             startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java))
         },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})
         /* legacy BIOS entry is now inside PS2 Settings */
-        /* 
         quickGrid.addView(quickTop,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(104)))
         val quickBottom=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
         quickBottom.addView(actionTile("↻","REFRESH","Rescan library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(104),1f).apply{rightMargin=dp(5)})
