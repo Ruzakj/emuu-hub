@@ -105,7 +105,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         }
         if (!biosOnly) {
             val perGame = Ps2PerGameSettings.load(this, romPath)
-            activeProfile = (perGame?.profile ?: Ps2Settings.load(this)).copy(upscale = 2f)
+            activeProfile = perGame?.profile ?: Ps2Settings.load(this)
             gameSpeedPercent = perGame?.speedPercent ?: 100
         }
         buildGameUi(); prepareRuntime()
@@ -193,46 +193,48 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         status = TextView(this).apply {
-            text = if (biosOnly) "PS2 • BIOS" else "PS2 • Z9X PERFORMANCE"
-            textSize = 10f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x77000000); setPadding(dp(9), dp(5), dp(9), dp(5))
+            text = if (biosOnly) "PS2 • BIOS" else "PS2 • Z9X"
+            textSize = 9f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x55000000); setPadding(dp(7), dp(3), dp(7), dp(3))
         }
-        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
-        addControl(root, Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 10, w = 66, h = 38)
+        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(126); topMargin = dp(10) })
 
         if (!biosOnly) {
             perfOverlay = TextView(this).apply {
-                text = "FPS -- • SPEED -- • 2×"
-                textSize = 10f; setTextColor(Color.WHITE); setBackgroundColor(0x77000000); setPadding(dp(8), dp(4), dp(8), dp(4))
+                text = "FPS -- • SPD -- • ${activeProfile.upscale}×"
+                textSize = 9f; setTextColor(Color.WHITE); setBackgroundColor(0x55000000); setPadding(dp(7), dp(3), dp(7), dp(3))
             }
-            root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(96) })
+            root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(126); topMargin = dp(36) })
 
-            addControl(root, Button(this).apply { text = "TUNE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 52, w = 72, h = 36)
-            addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 48), Gravity.TOP or Gravity.START, left = 10, top = 8, w = 48, h = 40)
-            addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)
-            addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)
-            addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 48), Gravity.TOP or Gravity.END, right = 64, top = 8, w = 48, h = 40)
+            // Compact top controls: shoulders stay at corners, system actions no longer stack over gameplay center.
+            addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 44), Gravity.TOP or Gravity.START, left = 8, top = 8, w = 44, h = 36)
+            addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 44), Gravity.TOP or Gravity.START, left = 58, top = 8, w = 44, h = 36)
+            addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 44), Gravity.TOP or Gravity.END, right = 158, top = 8, w = 44, h = 36)
+            addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 44), Gravity.TOP or Gravity.END, right = 108, top = 8, w = 44, h = 36)
+            addControl(root, Button(this).apply { text = "TUNE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.END, top = 8, right = 58, w = 46, h = 36)
+            addControl(root, Button(this).apply { text = "EXIT"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 8, w = 46, h = 36)
             addControl(root, control("▲", KeyEvent.KEYCODE_DPAD_UP), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 126)
             addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
             addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
             addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
             addControl(root, AnalogStickView(false), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
-            addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 247, bottom = 166, w = 48, h = 36)
+            addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 252, bottom = 150, w = 42, h = 32)
             addControl(root, AnalogStickView(true), Gravity.BOTTOM or Gravity.END, right = 205, bottom = 28, w = 132, h = 132)
-            addControl(root, control("R3", KeyEvent.KEYCODE_BUTTON_THUMBR, 48), Gravity.BOTTOM or Gravity.END, right = 247, bottom = 166, w = 48, h = 36)
+            addControl(root, control("R3", KeyEvent.KEYCODE_BUTTON_THUMBR, 48), Gravity.BOTTOM or Gravity.END, right = 252, bottom = 150, w = 42, h = 32)
             addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
             addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
             addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
             addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72)
-            addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -62, bottom = 22, w = 76, h = 36)
-            addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -62, bottom = 22, w = 76, h = 36)
+            addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -52, bottom = 12, w = 64, h = 30)
+            addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -52, bottom = 12, w = 64, h = 30)
 
             stateSlotButton = Button(this).apply {
-                text = "S0"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded()
+                text = "S0"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66)
                 setOnClickListener { stateSlot = (stateSlot + 1) % 10; text = "S$stateSlot" }
             }
-            addControl(root, stateSlotButton!!, Gravity.TOP or Gravity.CENTER_HORIZONTAL, left = -82, top = 8, w = 50, h = 38)
-            addControl(root, Button(this).apply { text = "SAVE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { saveStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 8, w = 64, h = 38)
-            addControl(root, Button(this).apply { text = "LOAD"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { loadStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, right = -82, top = 8, w = 64, h = 38)
+            // Save-state controls live in a slim upper-left secondary row, away from the game focal point.
+            addControl(root, stateSlotButton!!, Gravity.TOP or Gravity.START, left = 8, top = 50, w = 40, h = 30)
+            addControl(root, Button(this).apply { text = "SAVE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { saveStateNow() } }, Gravity.TOP or Gravity.START, left = 52, top = 50, w = 48, h = 30)
+            addControl(root, Button(this).apply { text = "LOAD"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { loadStateNow() } }, Gravity.TOP or Gravity.START, left = 104, top = 50, w = 48, h = 30)
         }
         setContentView(root)
     }
@@ -283,15 +285,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun applyProfileLive(profile: Ps2Profile) {
-        activeProfile = profile.copy(upscale = 2f)
+        activeProfile = profile.copy(upscale = profile.upscale.coerceIn(1f, 3f))
         if (!initialized) return
-        runCatching { NativeApp.renderUpscalemultiplier(2f) }
+        runCatching { NativeApp.renderUpscalemultiplier(activeProfile.upscale) }
         runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", activeProfile.mtvu.toString()) }
         runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", activeProfile.eeRate.toString()) }
         runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", activeProfile.eeSkip.toString()) }
         runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", (activeProfile.affinity == 7).toString()) }
         runCatching { NativeApp.commitSettings() }
-        status.text = "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"
+        status.text = "PS2 • ${activeProfile.upscale}× • EE ${activeProfile.eeRate}"
     }
 
     private fun openQuickMenu() {
@@ -322,18 +324,34 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         })
 
         val profileButton = Button(this).apply {
-            text = "Profile: ${activeProfile.preset} • 2×"
+            text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"
             isAllCaps = false
             setOnClickListener {
                 val names = arrayOf("Auto Z9x", "Balanced", "Performance", "Max Performance")
                 AlertDialog.Builder(this@Ps2GameActivity).setTitle("Performance profile").setItems(names) { d, which ->
-                    applyProfileLive(Ps2Settings.preset(names[which]).copy(upscale = 2f))
-                    text = "Profile: ${activeProfile.preset} • 2×"
+                    applyProfileLive(Ps2Settings.preset(names[which]))
+                    text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"
                     d.dismiss()
                 }.show()
             }
         }
         panel.addView(profileButton)
+
+        val resolutionButton = Button(this).apply {
+            text = "Internal Resolution: ${activeProfile.upscale}×"
+            isAllCaps = false
+            setOnClickListener {
+                val labels = arrayOf("1×", "1.5×", "2×", "2.5×", "3×")
+                val values = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f)
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("Internal Resolution").setItems(labels) { d, which ->
+                    applyProfileLive(activeProfile.copy(preset = "Custom", upscale = values[which]))
+                    text = "Internal Resolution: ${activeProfile.upscale}×"
+                    profileButton.text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"
+                    d.dismiss()
+                }.show()
+            }
+        }
+        panel.addView(resolutionButton)
 
         val eeButton = Button(this).apply {
             text = "EE Cycle Rate: ${activeProfile.eeRate}"
@@ -342,20 +360,45 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                 val labels = arrayOf("0 (100%)", "-1", "-2", "-3")
                 val values = intArrayOf(0, -1, -2, -3)
                 AlertDialog.Builder(this@Ps2GameActivity).setTitle("EE Cycle Rate").setItems(labels) { d, which ->
-                    applyProfileLive(activeProfile.copy(preset = "Custom", eeRate = values[which], upscale = 2f))
+                    applyProfileLive(activeProfile.copy(preset = "Custom", eeRate = values[which]))
                     text = "EE Cycle Rate: ${activeProfile.eeRate}"
-                    profileButton.text = "Profile: ${activeProfile.preset} • 2×"
+                    profileButton.text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"
                     d.dismiss()
                 }.show()
             }
         }
         panel.addView(eeButton)
 
+        val skipButton = Button(this).apply {
+            text = "EE Cycle Skip: ${activeProfile.eeSkip}"
+            isAllCaps = false
+            setOnClickListener {
+                val labels = arrayOf("Off (0)", "Mild (1)", "Medium (2)")
+                val values = intArrayOf(0, 1, 2)
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("EE Cycle Skip").setItems(labels) { d, which ->
+                    applyProfileLive(activeProfile.copy(preset = "Custom", eeSkip = values[which]))
+                    text = "EE Cycle Skip: ${activeProfile.eeSkip}"
+                    d.dismiss()
+                }.show()
+            }
+        }
+        panel.addView(skipButton)
+
+        val mtvuButton = Button(this).apply {
+            text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"
+            isAllCaps = false
+            setOnClickListener {
+                applyProfileLive(activeProfile.copy(preset = "Custom", mtvu = !activeProfile.mtvu))
+                text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"
+            }
+        }
+        panel.addView(mtvuButton)
+
         panel.addView(Button(this).apply {
             text = "SAVE PROFILE FOR THIS GAME"
             isAllCaps = false
             setOnClickListener {
-                Ps2PerGameSettings.save(this@Ps2GameActivity, romPath, Ps2PerGameProfile(activeProfile.copy(upscale = 2f), gameSpeedPercent))
+                Ps2PerGameSettings.save(this@Ps2GameActivity, romPath, Ps2PerGameProfile(activeProfile, gameSpeedPercent))
                 Toast.makeText(this@Ps2GameActivity, "Per-game profile saved", Toast.LENGTH_SHORT).show()
             }
         })
@@ -364,12 +407,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             isAllCaps = false
             setOnClickListener {
                 Ps2PerGameSettings.clear(this@Ps2GameActivity, romPath)
-                activeProfile = Ps2Settings.load(this@Ps2GameActivity).copy(upscale = 2f)
+                activeProfile = Ps2Settings.load(this@Ps2GameActivity)
                 applyProfileLive(activeProfile)
                 applyGameSpeed(100)
                 speedLabel.text = "Game Speed: 100%"
-                profileButton.text = "Profile: ${activeProfile.preset} • 2×"
+                profileButton.text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"
                 eeButton.text = "EE Cycle Rate: ${activeProfile.eeRate}"
+                resolutionButton.text = "Internal Resolution: ${activeProfile.upscale}×"
+                skipButton.text = "EE Cycle Skip: ${activeProfile.eeSkip}"
+                mtvuButton.text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"
                 Toast.makeText(this@Ps2GameActivity, "Per-game override cleared", Toast.LENGTH_SHORT).show()
             }
         })
@@ -395,7 +441,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                     val speed = runCatching { NativeApp.getEmuSpeedPercent() }.getOrDefault(0f)
                     val fpsText = if (fps > 0f) String.format(Locale.US, "%.1f", fps) else "--"
                     val speedText = if (speed > 0f) String.format(Locale.US, "%.0f", speed) else "--"
-                    perfOverlay?.text = "FPS $fpsText • SPEED $speedText% • TARGET $gameSpeedPercent% • 2×"
+                    perfOverlay?.text = "FPS $fpsText • SPD $speedText%/$gameSpeedPercent% • ${activeProfile.upscale}×"
                 }
                 perfOverlay?.postDelayed(this, 500L)
             }
@@ -427,7 +473,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             trace("before-z9x-performance-profile")
             runCatching { NativeApp.setAffinityMode(activeProfile.affinity) }
             runCatching { NativeApp.renderVulkan() }
-            runCatching { NativeApp.renderUpscalemultiplier(2f) }
+            runCatching { NativeApp.renderUpscalemultiplier(activeProfile.upscale) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", activeProfile.mtvu.toString()) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
@@ -456,7 +502,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • ${activeProfile.upscale}× • EE ${activeProfile.eeRate}"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
