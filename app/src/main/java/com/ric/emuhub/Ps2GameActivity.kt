@@ -1,6 +1,7 @@
 package com.ric.emuhub
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,10 +20,13 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -35,7 +39,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
-        private const val PS2_UPSCALE = 2.0f
 
         private const val PAD_L_UP = 110
         private const val PAD_L_RIGHT = 111
@@ -49,6 +52,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
     private lateinit var surface: SurfaceView
     private lateinit var status: TextView
+    private var perfOverlay: TextView? = null
     private var romPath = ""
     private var biosOnly = false
     private var surfaceReady = false
@@ -61,6 +65,9 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private var vmThread: Thread? = null
     private var stateSlot = 0
     private var stateSlotButton: Button? = null
+    private var perfPolling = false
+    private var activeProfile = Ps2Profile("Auto Z9x", 2f, -2, 0, true, 0)
+    private var gameSpeedPercent = 100
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -95,6 +102,11 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         }
         if (Ps2BiosActivity.selectedBios(this) == null) {
             trace("bios-missing", false); Toast.makeText(this, "Pilih BIOS PS2 dulu.", Toast.LENGTH_LONG).show(); finish(); return
+        }
+        if (!biosOnly) {
+            val perGame = Ps2PerGameSettings.load(this, romPath)
+            activeProfile = (perGame?.profile ?: Ps2Settings.load(this)).copy(upscale = 2f)
+            gameSpeedPercent = perGame?.speedPercent ?: 100
         }
         buildGameUi(); prepareRuntime()
     }
@@ -188,6 +200,13 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         addControl(root, Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 10, w = 66, h = 38)
 
         if (!biosOnly) {
+            perfOverlay = TextView(this).apply {
+                text = "FPS -- • SPEED -- • 2×"
+                textSize = 10f; setTextColor(Color.WHITE); setBackgroundColor(0x77000000); setPadding(dp(8), dp(4), dp(8), dp(4))
+            }
+            root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(96) })
+
+            addControl(root, Button(this).apply { text = "TUNE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 52, w = 72, h = 36)
             addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 48), Gravity.TOP or Gravity.START, left = 10, top = 8, w = 48, h = 40)
             addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)
             addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)
@@ -256,6 +275,134 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         }, "ps2-load-state").start()
     }
 
+    private fun applyGameSpeed(percent: Int) {
+        gameSpeedPercent = percent.coerceIn(25, 200)
+        if (!initialized) return
+        runCatching { NativeApp.setNominalSpeed(gameSpeedPercent) }
+        runCatching { NativeApp.speedhackLimitermode(0) }
+    }
+
+    private fun applyProfileLive(profile: Ps2Profile) {
+        activeProfile = profile.copy(upscale = 2f)
+        if (!initialized) return
+        runCatching { NativeApp.renderUpscalemultiplier(2f) }
+        runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", activeProfile.mtvu.toString()) }
+        runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", activeProfile.eeRate.toString()) }
+        runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", activeProfile.eeSkip.toString()) }
+        runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", (activeProfile.affinity == 7).toString()) }
+        runCatching { NativeApp.commitSettings() }
+        status.text = "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"
+    }
+
+    private fun openQuickMenu() {
+        if (!initialized || biosOnly || isFinishing) return
+        runCatching { NativeApp.pause() }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(6))
+        }
+        val speedLabel = TextView(this).apply {
+            text = "Game Speed: $gameSpeedPercent%"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        panel.addView(speedLabel)
+        panel.addView(SeekBar(this).apply {
+            max = 175
+            progress = gameSpeedPercent - 25
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    speedLabel.text = "Game Speed: ${progress + 25}%"
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) { applyGameSpeed((seekBar?.progress ?: 75) + 25) }
+            })
+        })
+
+        val profileButton = Button(this).apply {
+            text = "Profile: ${activeProfile.preset} • 2×"
+            isAllCaps = false
+            setOnClickListener {
+                val names = arrayOf("Auto Z9x", "Balanced", "Performance", "Max Performance")
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("Performance profile").setItems(names) { d, which ->
+                    applyProfileLive(Ps2Settings.preset(names[which]).copy(upscale = 2f))
+                    text = "Profile: ${activeProfile.preset} • 2×"
+                    d.dismiss()
+                }.show()
+            }
+        }
+        panel.addView(profileButton)
+
+        val eeButton = Button(this).apply {
+            text = "EE Cycle Rate: ${activeProfile.eeRate}"
+            isAllCaps = false
+            setOnClickListener {
+                val labels = arrayOf("0 (100%)", "-1", "-2", "-3")
+                val values = intArrayOf(0, -1, -2, -3)
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("EE Cycle Rate").setItems(labels) { d, which ->
+                    applyProfileLive(activeProfile.copy(preset = "Custom", eeRate = values[which], upscale = 2f))
+                    text = "EE Cycle Rate: ${activeProfile.eeRate}"
+                    profileButton.text = "Profile: ${activeProfile.preset} • 2×"
+                    d.dismiss()
+                }.show()
+            }
+        }
+        panel.addView(eeButton)
+
+        panel.addView(Button(this).apply {
+            text = "SAVE PROFILE FOR THIS GAME"
+            isAllCaps = false
+            setOnClickListener {
+                Ps2PerGameSettings.save(this@Ps2GameActivity, romPath, Ps2PerGameProfile(activeProfile.copy(upscale = 2f), gameSpeedPercent))
+                Toast.makeText(this@Ps2GameActivity, "Per-game profile saved", Toast.LENGTH_SHORT).show()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "RESET THIS GAME TO GLOBAL"
+            isAllCaps = false
+            setOnClickListener {
+                Ps2PerGameSettings.clear(this@Ps2GameActivity, romPath)
+                activeProfile = Ps2Settings.load(this@Ps2GameActivity).copy(upscale = 2f)
+                applyProfileLive(activeProfile)
+                applyGameSpeed(100)
+                speedLabel.text = "Game Speed: 100%"
+                profileButton.text = "Profile: ${activeProfile.preset} • 2×"
+                eeButton.text = "EE Cycle Rate: ${activeProfile.eeRate}"
+                Toast.makeText(this@Ps2GameActivity, "Per-game override cleared", Toast.LENGTH_SHORT).show()
+            }
+        })
+
+        AlertDialog.Builder(this)
+            .setTitle("PS2 QUICK TUNE • ${File(romPath).name}")
+            .setView(panel)
+            .setPositiveButton("DONE", null)
+            .create().also { dialog ->
+                dialog.setOnDismissListener { if (!isFinishing && initialized && vmStarted.get()) runCatching { NativeApp.resume() } }
+                dialog.show()
+            }
+    }
+
+    private fun startPerformanceOverlay() {
+        if (biosOnly || perfPolling) return
+        perfPolling = true
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!perfPolling || isFinishing || shuttingDown.get()) return
+                if (initialized && vmStarted.get()) {
+                    val fps = runCatching { NativeApp.getFPS() }.getOrDefault(0f)
+                    val speed = runCatching { NativeApp.getEmuSpeedPercent() }.getOrDefault(0f)
+                    val fpsText = if (fps > 0f) String.format(Locale.US, "%.1f", fps) else "--"
+                    val speedText = if (speed > 0f) String.format(Locale.US, "%.0f", speed) else "--"
+                    perfOverlay?.text = "FPS $fpsText • SPEED $speedText% • TARGET $gameSpeedPercent% • 2×"
+                }
+                perfOverlay?.postDelayed(this, 500L)
+            }
+        }
+        perfOverlay?.post(ticker)
+    }
+
     private fun prepareRuntime() {
         Thread({ try {
             trace("preparing-resources")
@@ -278,28 +425,25 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
         if (!biosOnly) {
             trace("before-z9x-performance-profile")
-            val profile = Ps2Settings.load(this)
-            runCatching { NativeApp.setAffinityMode(profile.affinity) }
+            runCatching { NativeApp.setAffinityMode(activeProfile.affinity) }
             runCatching { NativeApp.renderVulkan() }
-            runCatching { NativeApp.renderUpscalemultiplier(profile.upscale) }
+            runCatching { NativeApp.renderUpscalemultiplier(2f) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", profile.mtvu.toString()) }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", activeProfile.mtvu.toString()) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuFlagHack", "bool", "true") }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", profile.eeRate.toString()) }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", profile.eeSkip.toString()) }
-  // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
-  runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", (profile.affinity == 7).toString()) }
-  // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.
-  runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
-  runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
-  runCatching { NativeApp.setSetting("EmuCore/GS", "UseVSyncForTiming", "bool", "false") }
-  runCatching { NativeApp.setSetting("EmuCore/GS", "SkipDuplicateFrames", "bool", "true") }
-  runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncQueueSize", "int", "1") }
-  // Audio follows emulation speed; avoid host-refresh timing pressure that amplifies crackle during EE/VU spikes.
-  runCatching { NativeApp.setSetting("EmuCore", "CdvdPrecache", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", activeProfile.eeRate.toString()) }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", activeProfile.eeSkip.toString()) }
+            runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", (activeProfile.affinity == 7).toString()) }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "UseVSyncForTiming", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "SkipDuplicateFrames", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncQueueSize", "int", "1") }
+            runCatching { NativeApp.setSetting("EmuCore", "CdvdPrecache", "bool", "false") }
             runCatching { NativeApp.commitSettings() }
+            runCatching { NativeApp.setNominalSpeed(gameSpeedPercent) }
             runCatching { NativeApp.setAudioVolume(100) }
             @Suppress("DEPRECATION") val hz = windowManager.defaultDisplay.refreshRate
             if (hz > 0f) runCatching { NativeApp.setDisplayRefreshRate(hz) }
@@ -312,8 +456,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        val activeProfile = Ps2Settings.load(this)
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan ${activeProfile.upscale}x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
@@ -322,6 +465,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             trace(if (ok) "vm-returned-ok" else "vm-returned-false", false)
             runOnUiThread { if (!isFinishing && !shuttingDown.get()) { if (!ok) Toast.makeText(this, if (biosOnly) "BIOS-only boot gagal." else "PS2 gagal boot.", Toast.LENGTH_LONG).show(); finish() } }
         }, "armsx2-vm").also { it.priority = Thread.MAX_PRIORITY; it.start() }
+        startPerformanceOverlay()
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -352,7 +496,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     override fun onPause() { if (initialized && vmStarted.get() && !shuttingDown.get()) { runCatching { NativeApp.pause() }; runCatching { NativeApp.flushShaderCache() } }; super.onPause() }
     override fun onResume() { super.onResume(); if (initialized && vmStarted.get() && !shuttingDown.get()) runCatching { NativeApp.resume() } }
 
-    private fun shutdownCore() { if (!shuttingDown.compareAndSet(false, true)) return; if (initialized) runCatching { NativeApp.resetKeyStatus() }; if (initialized && vmStarted.get()) runCatching { NativeApp.shutdown() }; vmThread?.let { if (it.isAlive && it !== Thread.currentThread()) runCatching { it.join(1500) } }; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false }; if (!vmStarted.get()) trace("closed-before-vm", false) }
+    private fun shutdownCore() { if (!shuttingDown.compareAndSet(false, true)) return; perfPolling = false; if (initialized) runCatching { NativeApp.resetKeyStatus() }; if (initialized && vmStarted.get()) runCatching { NativeApp.shutdown() }; vmThread?.let { if (it.isAlive && it !== Thread.currentThread()) runCatching { it.join(1500) } }; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false }; if (!vmStarted.get()) trace("closed-before-vm", false) }
     override fun finish() { shutdownCore(); super.finish() }
     override fun onDestroy() { shutdownCore(); super.onDestroy() }
     @Deprecated("Framework compatibility") override fun onBackPressed() { finish() }
