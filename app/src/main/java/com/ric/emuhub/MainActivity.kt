@@ -176,7 +176,7 @@ class MainActivity : Activity() {
     private fun buildConsoleStrip():View{
         val hsv=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER}
         val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        listOf(Triple("PSP","PPSSPP","2×"),Triple("PS1","PCSX","ARM"),Triple("PS2","ARMSX2","VK"),Triple("GBA","mGBA","CORE"),Triple("NES","FCEUmm","CORE"),Triple("SNES","Snes9x","CORE"),Triple("SWITCH","Eden","EXT")).forEachIndexed{index,item->
+        listOf(Triple("PSP","PPSSPP","2×"),Triple("PS1","PCSX","ARM"),Triple("PS2","ARMSX2","VK"),Triple("GBA","mGBA","CORE"),Triple("NES","FCEUmm","CORE"),Triple("SNES","Snes9x","CORE"),Triple("JAVA","JL-Mod","INT"),Triple("SWITCH","Eden","EXT")).forEachIndexed{index,item->
             val chip=LinearLayout(this).apply{
                 orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(14),dp(10),dp(16),dp(10));background=rounded(if(index==0)0xFF101010.toInt() else 0xFF080808.toInt(),16,if(index==0)0xFF333333.toInt() else 0xFF1D1D1D.toInt());addView(textView(item.first,12f,0xFFFFFFFF.toInt(),true));addView(textView("${item.second} • ${item.third}",9.5f,0xFF777777.toInt()),LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(3)})
                 if(item.first=="PS2"){
@@ -185,6 +185,10 @@ class MainActivity : Activity() {
                         status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • tap to change" else "PS2 BIOS setup • pilih BIOS dulu"
                         startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))
                     }
+                }
+                if(item.first=="JAVA"){
+                    isClickable=true;isFocusable=true
+                    setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}
                 }
             }
             row.addView(chip,LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(60)).apply{if(index>0)leftMargin=dp(8)})
