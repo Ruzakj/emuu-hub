@@ -21,6 +21,7 @@ data class Ps2Profile(
  */
 object Ps2Settings {
     private const val FILE_NAME = "ps2-manual-settings.properties"
+    private const val TARGET_UPSCALE = 2.0f
 
     private fun file(context: Context) = File(context.filesDir, FILE_NAME)
 
@@ -32,7 +33,7 @@ object Ps2Settings {
         }
         return Ps2Profile(
             preset = props.getProperty("preset", "Auto Z9x"),
-            upscale = props.getProperty("upscale", "2.0").toFloatOrNull()?.coerceIn(1f, 3f) ?: 2f,
+            upscale = props.getProperty("upscale", TARGET_UPSCALE.toString()).toFloatOrNull()?.coerceIn(1f, 3f) ?: TARGET_UPSCALE,
             eeRate = props.getProperty("eeRate", "-2").toIntOrNull()?.coerceIn(-3, 0) ?: -2,
             eeSkip = props.getProperty("eeSkip", "0").toIntOrNull()?.coerceIn(0, 2) ?: 0,
             mtvu = props.getProperty("mtvu", "true").toBooleanStrictOrNull() ?: true,
@@ -62,10 +63,12 @@ object Ps2Settings {
         }.getOrThrow()
     }
 
+    // All automatic Z9x profiles stay at 2x. Performance is gained from CPU/VU
+    // scheduling and EE tuning instead of silently reducing image resolution.
     fun preset(name: String): Ps2Profile = when (name) {
-        "Balanced" -> Ps2Profile(name, 2f, -1, 0, true, 0)
-        "Performance" -> Ps2Profile(name, 2f, -2, 0, true, 0)
-        "Max Performance" -> Ps2Profile(name, 1.5f, -3, 0, true, 0)
-        else -> Ps2Profile("Auto Z9x", 2f, -2, 0, true, 0)
+        "Balanced" -> Ps2Profile(name, TARGET_UPSCALE, -1, 0, true, 0)
+        "Performance" -> Ps2Profile(name, TARGET_UPSCALE, -2, 0, true, 0)
+        "Max Performance" -> Ps2Profile(name, TARGET_UPSCALE, -3, 0, true, 0)
+        else -> Ps2Profile("Auto Z9x", TARGET_UPSCALE, -2, 0, true, 0)
     }
 }
