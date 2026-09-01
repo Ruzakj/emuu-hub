@@ -1,0 +1,44 @@
+name: Apply iQOO Z9x Smooth PS2 Profile
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-z9x-smooth-profile.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply Z9x smooth profile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s=p.read_text()
+          s=s.replace('NativeApp.setAffinityMode(7)', 'NativeApp.setAffinityMode(0)')
+          s=s.replace('NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-1")', 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-2")')
+          needle='runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }'
+          repl='''runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
+            // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
+            runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", "false") }
+            // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.
+            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "UseVSyncForTiming", "bool", "false") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "SkipDuplicateFrames", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncQueueSize", "int", "1") }
+            // Audio follows emulation speed; avoid host-refresh timing pressure that amplifies crackle during EE/VU spikes.
+            runCatching { NativeApp.setSetting("EmuCore", "CdvdPrecache", "bool", "false") }'''
+          if needle not in s: raise SystemExit('target speedhack block not found')
+          s=s.replace(needle,repl,1)
+          s=s.replace('PS2 • Vulkan 2x • PERF CORES', 'PS2 • Vulkan 2x • Z9X SMOOTH')
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
+          git commit -m "Tune PS2 2x smooth profile for iQOO Z9x"
+          git push
