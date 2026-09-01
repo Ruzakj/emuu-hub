@@ -35,18 +35,12 @@ public final class NativeApp {
         return getRuntimePageSize() >= 16384 ? "emucore_16k" : "emucore_4k";
     }
 
-    /**
-     * Load ARMSX2 on demand, after Ps2GameActivity is already running in its dedicated :ps2
-     * process. This prevents Emu Hub's NDK27/libretro C++ runtime from sharing a process with
-     * ARMSX2's NDK28 libc++_shared and removes class-initializer crashes from NativeApp itself.
-     */
     public static synchronized boolean loadNative(Context context) {
         attachContext(context);
         if (loadAttempted) return !hasNoNativeBinary;
         loadAttempted = true;
         final String libraryName = selectNativeLibraryName();
         try {
-            // Match upstream ARMSX2: load emucore directly and let Android resolve DT_NEEDED.
             System.loadLibrary(libraryName);
             hasNoNativeBinary = false;
             nativeLoadError = "";
@@ -86,6 +80,8 @@ public final class NativeApp {
     public static native void setAudioVolume(int volume);
     public static native void setAudioMuted(boolean muted);
     public static native void flushShaderCache();
+    public static native void setSetting(String section, String key, String type, String value);
+    public static native void commitSettings();
 
     public static void vmSetPaused(boolean value) { paused = value; }
     public static boolean isPaused() { return paused; }
