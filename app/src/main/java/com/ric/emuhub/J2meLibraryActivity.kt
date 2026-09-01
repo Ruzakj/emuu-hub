@@ -34,6 +34,15 @@ class J2meLibraryActivity : Activity() {
         if (b) setTypeface(typeface, Typeface.BOLD)
     }
 
+    private fun trace(game: String, stage: String, active: Boolean = true) {
+        getSharedPreferences("j2me_runtime_trace", MODE_PRIVATE).edit()
+            .putString("game", game)
+            .putString("stage", stage)
+            .putLong("stage_time", System.currentTimeMillis())
+            .putBoolean("active", active)
+            .commit()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = 0xFF000000.toInt(); window.navigationBarColor = 0xFF000000.toInt()
@@ -72,7 +81,6 @@ class J2meLibraryActivity : Activity() {
         worker.execute {
             @Suppress("DEPRECATION")
             val converted = File(File(Environment.getExternalStorageDirectory(), "Java"), "converted")
-            // Do not decode 1000+ icons or inflate 1000+ rows during scan. RecyclerView binds only visible rows.
             val games = converted.listFiles()
                 ?.asSequence()
                 ?.filter { it.isDirectory && File(it, "converted.zip").isFile }
@@ -86,12 +94,15 @@ class J2meLibraryActivity : Activity() {
     }
 
     private fun launchGame(dir: File) {
+        trace(dir.name, "tap-game")
         worker.execute {
             try {
+                trace(dir.name, "validate-files")
                 val dex = File(dir, "converted.zip")
                 val res = File(dir, "res.jar")
                 val manifest = File(dir, "converted.dex.conf")
                 if (!dex.isFile || !res.isFile || !manifest.isFile) {
+                    trace(dir.name, "invalid-files", false)
                     runOnUiThread { Toast.makeText(this, "File J2ME belum lengkap: ${dir.name}", Toast.LENGTH_LONG).show() }
                     return@execute
                 }
@@ -100,19 +111,29 @@ class J2meLibraryActivity : Activity() {
                 val javaRoot = File(Environment.getExternalStorageDirectory(), "Java")
                 val configDir = File(File(javaRoot, "configs"), dir.name)
                 val configFile = File(configDir, "config.json")
+                trace(dir.name, "prepare-config")
                 if (!configFile.isFile) {
                     if (!configDir.exists()) configDir.mkdirs()
                     val profile = ProfileModel(configDir)
                     if (!ProfilesManager.saveConfig(profile)) {
+                        trace(dir.name, "config-save-failed", false)
                         runOnUiThread { Toast.makeText(this, "Gagal membuat config J2ME", Toast.LENGTH_LONG).show() }
                         return@execute
                     }
                 }
+                trace(dir.name, "before-config-startApp")
                 runOnUiThread {
-                    runCatching { Config.startApp(this, dir.name, dir.absolutePath) }
-                        .onFailure { Toast.makeText(this, "J2ME gagal start: ${it.message}", Toast.LENGTH_LONG).show() }
+                    runCatching {
+                        trace(dir.name, "startApp-call")
+                        Config.startApp(this, dir.name, dir.absolutePath)
+                        trace(dir.name, "activity-started")
+                    }.onFailure {
+                        trace(dir.name, "startApp-exception")
+                        Toast.makeText(this, "J2ME gagal start: ${it.javaClass.simpleName}: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (t: Throwable) {
+                trace(dir.name, "launcher-exception")
                 runOnUiThread { Toast.makeText(this, "J2ME error: ${t.javaClass.simpleName}: ${t.message}", Toast.LENGTH_LONG).show() }
             }
         }
