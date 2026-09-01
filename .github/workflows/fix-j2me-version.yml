@@ -1,0 +1,36 @@
+name: Fix J2ME Version
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/fix-j2me-version.yml' ]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch JL-Mod library BuildConfig
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/integrate-j2me.yml')
+          s=p.read_text()
+          needle="          s=s.replace('        versionName = \"0.87.1\"\\n', '')\n"
+          insert=needle + "          s=s.replace('        minSdk = rootProject.extra[\"minSdk\"] as Int\\n', '        minSdk = rootProject.extra[\"minSdk\"] as Int\\n        buildConfigField(\"String\", \"VERSION_NAME\", \"\\\"0.89.0-emuhub\\\"\")\\n')\n"
+          if 'buildConfigField(\\"String\\", \\"VERSION_NAME\\"' not in s:
+              if needle not in s:
+                  raise SystemExit('patch anchor not found')
+              s=s.replace(needle, insert)
+              p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/integrate-j2me.yml
+          git commit -m "Define JL-Mod version for embedded runtime" || exit 0
+          git push
