@@ -8,6 +8,7 @@ import java.io.File
 class EmuHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        runCatching { javax.microedition.util.ContextHolder.init(this) }
 
         runCatching { StoragePaths.ensureLayout(this) }
 
