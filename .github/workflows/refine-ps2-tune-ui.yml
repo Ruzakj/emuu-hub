@@ -1,0 +1,94 @@
+name: Refine PS2 Tune UI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/refine-ps2-tune-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch PS2 runtime UI and quick tune
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s=p.read_text()
+
+          s=s.replace('activeProfile = (perGame?.profile ?: Ps2Settings.load(this)).copy(upscale = 2f)',
+                      'activeProfile = perGame?.profile ?: Ps2Settings.load(this)')
+
+          old='''        status = TextView(this).apply {\n            text = if (biosOnly) "PS2 • BIOS" else "PS2 • Z9X PERFORMANCE"\n            textSize = 10f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x77000000); setPadding(dp(9), dp(5), dp(9), dp(5))\n        }\n        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })\n        addControl(root, Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 10, w = 66, h = 38)\n\n        if (!biosOnly) {\n            perfOverlay = TextView(this).apply {\n                text = "FPS -- • SPEED -- • 2×"\n                textSize = 10f; setTextColor(Color.WHITE); setBackgroundColor(0x77000000); setPadding(dp(8), dp(4), dp(8), dp(4))\n            }\n            root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(96) })\n\n            addControl(root, Button(this).apply { text = "TUNE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 52, w = 72, h = 36)\n            addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 48), Gravity.TOP or Gravity.START, left = 10, top = 8, w = 48, h = 40)\n            addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)\n            addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)\n            addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 48), Gravity.TOP or Gravity.END, right = 64, top = 8, w = 48, h = 40)'''
+          new='''        status = TextView(this).apply {\n            text = if (biosOnly) "PS2 • BIOS" else "PS2 • Z9X"\n            textSize = 9f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x55000000); setPadding(dp(7), dp(3), dp(7), dp(3))\n        }\n        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(126); topMargin = dp(10) })\n\n        if (!biosOnly) {\n            perfOverlay = TextView(this).apply {\n                text = "FPS -- • SPD -- • ${activeProfile.upscale}×"\n                textSize = 9f; setTextColor(Color.WHITE); setBackgroundColor(0x55000000); setPadding(dp(7), dp(3), dp(7), dp(3))\n            }\n            root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(126); topMargin = dp(36) })\n\n            // Compact top controls: shoulders stay at corners, system actions no longer stack over gameplay center.\n            addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 44), Gravity.TOP or Gravity.START, left = 8, top = 8, w = 44, h = 36)\n            addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 44), Gravity.TOP or Gravity.START, left = 58, top = 8, w = 44, h = 36)\n            addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 44), Gravity.TOP or Gravity.END, right = 158, top = 8, w = 44, h = 36)\n            addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 44), Gravity.TOP or Gravity.END, right = 108, top = 8, w = 44, h = 36)\n            addControl(root, Button(this).apply { text = "TUNE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.END, top = 8, right = 58, w = 46, h = 36)\n            addControl(root, Button(this).apply { text = "EXIT"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 8, w = 46, h = 36)'''
+          if old not in s:
+              raise SystemExit('top UI block not found')
+          s=s.replace(old,new,1)
+
+          # Move L3/R3 closer to their sticks, reduce visual weight, and make center buttons smaller.
+          s=s.replace('left = 247, bottom = 166, w = 48, h = 36', 'left = 252, bottom = 150, w = 42, h = 32')
+          s=s.replace('right = 247, bottom = 166, w = 48, h = 36', 'right = 252, bottom = 150, w = 42, h = 32')
+          s=s.replace('left = -62, bottom = 22, w = 76, h = 36', 'left = -52, bottom = 12, w = 64, h = 30')
+          s=s.replace('right = -62, bottom = 22, w = 76, h = 36', 'right = -52, bottom = 12, w = 64, h = 30')
+
+          old_state='''            stateSlotButton = Button(this).apply {\n                text = "S0"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded()\n                setOnClickListener { stateSlot = (stateSlot + 1) % 10; text = "S$stateSlot" }\n            }\n            addControl(root, stateSlotButton!!, Gravity.TOP or Gravity.CENTER_HORIZONTAL, left = -82, top = 8, w = 50, h = 38)\n            addControl(root, Button(this).apply { text = "SAVE"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { saveStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, top = 8, w = 64, h = 38)\n            addControl(root, Button(this).apply { text = "LOAD"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { loadStateNow() } }, Gravity.TOP or Gravity.CENTER_HORIZONTAL, right = -82, top = 8, w = 64, h = 38)'''
+          new_state='''            stateSlotButton = Button(this).apply {\n                text = "S0"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66)\n                setOnClickListener { stateSlot = (stateSlot + 1) % 10; text = "S$stateSlot" }\n            }\n            // Save-state controls live in a slim upper-left secondary row, away from the game focal point.\n            addControl(root, stateSlotButton!!, Gravity.TOP or Gravity.START, left = 8, top = 50, w = 40, h = 30)\n            addControl(root, Button(this).apply { text = "SAVE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { saveStateNow() } }, Gravity.TOP or Gravity.START, left = 52, top = 50, w = 48, h = 30)\n            addControl(root, Button(this).apply { text = "LOAD"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { loadStateNow() } }, Gravity.TOP or Gravity.START, left = 104, top = 50, w = 48, h = 30)'''
+          if old_state not in s:
+              raise SystemExit('savestate block not found')
+          s=s.replace(old_state,new_state,1)
+
+          old_apply='''    private fun applyProfileLive(profile: Ps2Profile) {\n        activeProfile = profile.copy(upscale = 2f)\n        if (!initialized) return\n        runCatching { NativeApp.renderUpscalemultiplier(2f) }'''
+          new_apply='''    private fun applyProfileLive(profile: Ps2Profile) {\n        activeProfile = profile.copy(upscale = profile.upscale.coerceIn(1f, 3f))\n        if (!initialized) return\n        runCatching { NativeApp.renderUpscalemultiplier(activeProfile.upscale) }'''
+          if old_apply not in s:
+              raise SystemExit('applyProfileLive block not found')
+          s=s.replace(old_apply,new_apply,1)
+          s=s.replace('status.text = "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"',
+                      'status.text = "PS2 • ${activeProfile.upscale}× • EE ${activeProfile.eeRate}"',1)
+
+          # Quick menu: keep speed native-live, add live resolution, EE skip and MTVU.
+          needle='''        panel.addView(profileButton)\n\n        val eeButton = Button(this).apply {'''
+          insert='''        panel.addView(profileButton)\n\n        val resolutionButton = Button(this).apply {\n            text = "Internal Resolution: ${activeProfile.upscale}×"\n            isAllCaps = false\n            setOnClickListener {\n                val labels = arrayOf("1×", "1.5×", "2×", "2.5×", "3×")\n                val values = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f)\n                AlertDialog.Builder(this@Ps2GameActivity).setTitle("Internal Resolution").setItems(labels) { d, which ->\n                    applyProfileLive(activeProfile.copy(preset = "Custom", upscale = values[which]))\n                    text = "Internal Resolution: ${activeProfile.upscale}×"\n                    profileButton.text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"\n                    d.dismiss()\n                }.show()\n            }\n        }\n        panel.addView(resolutionButton)\n\n        val eeButton = Button(this).apply {'''
+          if needle not in s:
+              raise SystemExit('quick menu insertion point not found')
+          s=s.replace(needle,insert,1)
+
+          needle2='''        panel.addView(eeButton)\n\n        panel.addView(Button(this).apply {\n            text = "SAVE PROFILE FOR THIS GAME"'''
+          insert2='''        panel.addView(eeButton)\n\n        val skipButton = Button(this).apply {\n            text = "EE Cycle Skip: ${activeProfile.eeSkip}"\n            isAllCaps = false\n            setOnClickListener {\n                val labels = arrayOf("Off (0)", "Mild (1)", "Medium (2)")\n                val values = intArrayOf(0, 1, 2)\n                AlertDialog.Builder(this@Ps2GameActivity).setTitle("EE Cycle Skip").setItems(labels) { d, which ->\n                    applyProfileLive(activeProfile.copy(preset = "Custom", eeSkip = values[which]))\n                    text = "EE Cycle Skip: ${activeProfile.eeSkip}"\n                    d.dismiss()\n                }.show()\n            }\n        }\n        panel.addView(skipButton)\n\n        val mtvuButton = Button(this).apply {\n            text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"\n            isAllCaps = false\n            setOnClickListener {\n                applyProfileLive(activeProfile.copy(preset = "Custom", mtvu = !activeProfile.mtvu))\n                text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"\n            }\n        }\n        panel.addView(mtvuButton)\n\n        panel.addView(Button(this).apply {\n            text = "SAVE PROFILE FOR THIS GAME"'''
+          if needle2 not in s:
+              raise SystemExit('quick menu second insertion point not found')
+          s=s.replace(needle2,insert2,1)
+
+          s=s.replace('Ps2PerGameProfile(activeProfile.copy(upscale = 2f), gameSpeedPercent)', 'Ps2PerGameProfile(activeProfile, gameSpeedPercent)')
+          s=s.replace('activeProfile = Ps2Settings.load(this@Ps2GameActivity).copy(upscale = 2f)', 'activeProfile = Ps2Settings.load(this@Ps2GameActivity)')
+          s=s.replace('profileButton.text = "Profile: ${activeProfile.preset} • 2×"', 'profileButton.text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"')
+          s=s.replace('text = "Profile: ${activeProfile.preset} • 2×"', 'text = "Profile: ${activeProfile.preset} • ${activeProfile.upscale}×"')
+          s=s.replace('applyProfileLive(Ps2Settings.preset(names[which]).copy(upscale = 2f))', 'applyProfileLive(Ps2Settings.preset(names[which]))')
+          s=s.replace('applyProfileLive(activeProfile.copy(preset = "Custom", eeRate = values[which], upscale = 2f))', 'applyProfileLive(activeProfile.copy(preset = "Custom", eeRate = values[which]))')
+
+          # Reset quick menu labels fully.
+          s=s.replace('eeButton.text = "EE Cycle Rate: ${activeProfile.eeRate}"\n                Toast.makeText',
+                      'eeButton.text = "EE Cycle Rate: ${activeProfile.eeRate}"\n                resolutionButton.text = "Internal Resolution: ${activeProfile.upscale}×"\n                skipButton.text = "EE Cycle Skip: ${activeProfile.eeSkip}"\n                mtvuButton.text = "MTVU: ${if (activeProfile.mtvu) "ON" else "OFF"}"\n                Toast.makeText')
+
+          s=s.replace('perfOverlay?.text = "FPS $fpsText • SPEED $speedText% • TARGET $gameSpeedPercent% • 2×"',
+                      'perfOverlay?.text = "FPS $fpsText • SPD $speedText%/$gameSpeedPercent% • ${activeProfile.upscale}×"')
+
+          s=s.replace('runCatching { NativeApp.renderUpscalemultiplier(2f) }', 'runCatching { NativeApp.renderUpscalemultiplier(activeProfile.upscale) }',1)
+          s=s.replace('status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • ${activeProfile.preset.uppercase()} • EE ${activeProfile.eeRate} • SKIP ${activeProfile.eeSkip}"',
+                      'status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • ${activeProfile.upscale}× • EE ${activeProfile.eeRate}"')
+
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
+          git commit -m 'Refine PS2 quick tune and controller layout'
+          git push
