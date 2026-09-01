@@ -2,9 +2,13 @@ package com.ric.emuhub
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -17,14 +21,26 @@ import android.widget.Toast
 import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
+import kotlin.math.min
 
-/** Minimal ARMSX2 host. Supports BIOS-only boot to isolate firmware/runtime from disc boot. */
+/** ARMSX2 host tuned for Emu Hub's Snapdragon 6 Gen 1 target. */
 class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     companion object {
         const val EXTRA_BIOS_ONLY = "biosOnly"
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
+
+        // ARMSX2 Android-native analog pseudo key codes used by upstream MainActivity.
+        private const val PAD_L_UP = 110
+        private const val PAD_L_RIGHT = 111
+        private const val PAD_L_DOWN = 112
+        private const val PAD_L_LEFT = 113
+        private const val PAD_R_UP = 120
+        private const val PAD_R_RIGHT = 121
+        private const val PAD_R_DOWN = 122
+        private const val PAD_R_LEFT = 123
     }
 
     private lateinit var surface: SurfaceView
@@ -61,6 +77,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         trace(if (biosOnly) "bios-only-activity-created" else "activity-created")
         window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) runCatching { window.setSustainedPerformanceMode(true) }
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
@@ -73,59 +90,170 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         if (Ps2BiosActivity.selectedBios(this) == null) {
             trace("bios-missing", false); Toast.makeText(this, "Pilih BIOS PS2 dulu.", Toast.LENGTH_LONG).show(); finish(); return
         }
-        buildMinimalUi(); prepareRuntime()
+        buildGameUi(); prepareRuntime()
     }
 
-    private fun buildMinimalUi() {
+    private fun rounded(alpha: Int = 0x77): GradientDrawable = GradientDrawable().apply {
+        setColor(Color.argb(alpha, 18, 18, 18)); cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.argb(110, 255, 255, 255))
+    }
+
+    private fun control(text: String, keyCode: Int, size: Int = 54): Button = Button(this).apply {
+        this.text = text; textSize = 16f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded();
+        setPadding(0, 0, 0, 0); minWidth = 0; minHeight = 0
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { v.isPressed = true; sendPad(keyCode, true) }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { v.isPressed = false; sendPad(keyCode, false) }
+            }
+            true
+        }
+        layoutParams = FrameLayout.LayoutParams(dp(size), dp(size))
+    }
+
+    private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54) {
+        root.addView(button, FrameLayout.LayoutParams(dp(w), dp(h), gravity).apply {
+            leftMargin = dp(left); topMargin = dp(top); rightMargin = dp(right); bottomMargin = dp(bottom)
+        })
+    }
+
+    private fun buildGameUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         surface = SurfaceView(this).also { it.holder.addCallback(this) }
         root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
         status = TextView(this).apply {
-            text = if (biosOnly) "PS2 • BIOS-only boot" else "PS2 • first-frame boot"
-            textSize = 11f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x99000000.toInt()); setPadding(dp(10),dp(6),dp(10),dp(6))
+            text = if (biosOnly) "PS2 • BIOS" else "PS2 • PERFORMANCE"
+            textSize = 10f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x77000000); setPadding(dp(9), dp(5), dp(9), dp(5))
         }
-        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=dp(10)})
-        root.addView(Button(this).apply{text="EXIT";textSize=10f;isAllCaps=false;setOnClickListener{finish()}},FrameLayout.LayoutParams(dp(70),dp(42),Gravity.TOP or Gravity.END).apply{topMargin=dp(10);rightMargin=dp(12)})
+        root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
+        addControl(root, Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 10, w = 66, h = 38)
+
+        if (!biosOnly) {
+            // Shoulder buttons.
+            addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 48), Gravity.TOP or Gravity.START, left = 10, top = 8, w = 48, h = 40)
+            addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)
+            addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)
+            addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 48), Gravity.TOP or Gravity.END, right = 64, top = 8, w = 48, h = 40)
+
+            // D-pad, bottom-left.
+            addControl(root, control("▲", KeyEvent.KEYCODE_DPAD_UP), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 126)
+            addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
+            addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
+            addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
+
+            // Left analog quick pad. Using upstream ARMSX2 pseudo-key codes avoids SDL JNI.
+            addControl(root, control("L▲", PAD_L_UP, 44), Gravity.BOTTOM or Gravity.START, left = 232, bottom = 116, w = 44, h = 44)
+            addControl(root, control("L▼", PAD_L_DOWN, 44), Gravity.BOTTOM or Gravity.START, left = 232, bottom = 24, w = 44, h = 44)
+            addControl(root, control("L◀", PAD_L_LEFT, 44), Gravity.BOTTOM or Gravity.START, left = 186, bottom = 70, w = 44, h = 44)
+            addControl(root, control("L▶", PAD_L_RIGHT, 44), Gravity.BOTTOM or Gravity.START, left = 278, bottom = 70, w = 44, h = 44)
+
+            // PS face layout, bottom-right. Android A/B/X/Y map upstream to Cross/Circle/Square/Triangle.
+            addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
+            addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
+            addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
+            addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72)
+
+            addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -62, bottom = 22, w = 76, h = 36)
+            addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -62, bottom = 22, w = 76, h = 36)
+        }
         setContentView(root)
+    }
+
+    private fun sendPad(keyCode: Int, pressed: Boolean, analogForce: Int = 0) {
+        if (!initialized) return
+        val force = if (pressed && keyCode >= 110) {
+            if (analogForce > 0) analogForce else (90f * 32766f / 100f).toInt()
+        } else 0
+        runCatching { NativeApp.setPadButton(keyCode, force, pressed) }
     }
 
     private fun prepareRuntime() {
         Thread({ try {
             trace("preparing-resources")
-            val dataRoot=File(filesDir,"ps2").apply{mkdirs()}; val resourcesDir=File(dataRoot,"resources")
-            resourcesDir.deleteRecursively(); copyAssetTree("ARMSX2",resourcesDir)
-            val biosDir=Ps2BiosActivity.biosDir(this)
-            trace("resources-ready"); runOnUiThread{initializeCore(dataRoot,biosDir)}
-        } catch(t:Throwable){trace("prepare-error:${t.javaClass.simpleName}",false);runOnUiThread{Toast.makeText(this,"PS2 runtime gagal: ${t.message}",Toast.LENGTH_LONG).show();finish()}}},"ps2-prepare").start()
+            val dataRoot = File(filesDir, "ps2").apply { mkdirs() }; val resourcesDir = File(dataRoot, "resources")
+            resourcesDir.deleteRecursively(); copyAssetTree("ARMSX2", resourcesDir)
+            val biosDir = Ps2BiosActivity.biosDir(this)
+            trace("resources-ready"); runOnUiThread { initializeCore(dataRoot, biosDir) }
+        } catch (t: Throwable) { trace("prepare-error:${t.javaClass.simpleName}", false); runOnUiThread { Toast.makeText(this, "PS2 runtime gagal: ${t.message}", Toast.LENGTH_LONG).show(); finish() } } }, "ps2-prepare").start()
     }
 
-    private fun copyAssetTree(assetPath:String,target:File){val children=assets.list(assetPath).orEmpty();if(children.isEmpty()){target.parentFile?.mkdirs();assets.open(assetPath).use{i->target.outputStream().use{i.copyTo(it)}};return};target.mkdirs();children.forEach{copyAssetTree("$assetPath/$it",File(target,it))}}
+    private fun copyAssetTree(assetPath: String, target: File) { val children = assets.list(assetPath).orEmpty(); if (children.isEmpty()) { target.parentFile?.mkdirs(); assets.open(assetPath).use { i -> target.outputStream().use { i.copyTo(it) } }; return }; target.mkdirs(); children.forEach { copyAssetTree("$assetPath/$it", File(target, it)) } }
 
-    private fun initializeCore(dataRoot:File,biosDir:File){if(initialized||isFinishing)return;try{
-        status.text="PS2 • native load"
-        trace("before-native-load")
-        if(!NativeApp.loadNative(this)) error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
-        trace("after-native-load")
-        // First-frame mode intentionally skips SDLControllerManager.nativeSetupJNI().
-        // The embedded ARMSX2 build bypasses SDL's standalone Android JNI registration,
-        // and controller registration is not required to initialize/boot the PS2 VM.
-        trace("sdl-setup-skipped")
-        status.text="PS2 • initialize";trace(if(biosOnly)"bios-only-before-initialize" else "before-initialize");NativeApp.initialize(dataRoot.absolutePath,biosDir.absolutePath,Build.VERSION.SDK_INT);trace(if(biosOnly)"bios-only-after-initialize" else "after-initialize")
-        trace("renderer-auto-default")
-        initialized=true;attachNativeSurfaceIfReady();maybeStartVm()
-    }catch(t:Throwable){trace("init-error:${t.javaClass.simpleName}",false);Toast.makeText(this,"ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}",Toast.LENGTH_LONG).show();finish()}}
+    private fun initializeCore(dataRoot: File, biosDir: File) { if (initialized || isFinishing) return; try {
+        status.text = "PS2 • native load"; trace("before-native-load")
+        if (!NativeApp.loadNative(this)) error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
+        trace("after-native-load"); trace("sdl-setup-skipped")
+        status.text = "PS2 • initialize"; trace(if (biosOnly) "bios-only-before-initialize" else "before-initialize")
+        NativeApp.initialize(dataRoot.absolutePath, biosDir.absolutePath, Build.VERSION.SDK_INT)
+        trace(if (biosOnly) "bios-only-after-initialize" else "after-initialize")
 
-    private fun attachNativeSurfaceIfReady(){if(!initialized||!surfaceReady||nativeSurfaceAttached)return;val h=surface.holder;val w=if(surfaceWidth>0)surfaceWidth else surface.width;val ht=if(surfaceHeight>0)surfaceHeight else surface.height;if(!h.surface.isValid||w<=0||ht<=0)return;status.text="PS2 • attach surface";trace("before-surface-created");NativeApp.onNativeSurfaceCreated();trace("after-surface-created");trace("before-surface-changed");NativeApp.onNativeSurfaceChanged(h.surface,w,ht);trace("after-surface-changed");nativeSurfaceAttached=true}
+        // Conservative Z9x profile first: Vulkan + native resolution + scheduler hints.
+        if (!biosOnly) {
+            trace("before-performance-profile")
+            runCatching { NativeApp.renderVulkan() }
+            runCatching { NativeApp.renderUpscalemultiplier(1.0f) }
+            if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
+            runCatching { NativeApp.setAudioVolume(100) }
+            @Suppress("DEPRECATION") val hz = windowManager.defaultDisplay.refreshRate
+            if (hz > 0f) runCatching { NativeApp.setDisplayRefreshRate(hz) }
+            runCatching { NativeApp.resetKeyStatus() }
+            trace("performance-profile-ready")
+        }
+        initialized = true; attachNativeSurfaceIfReady(); maybeStartVm()
+    } catch (t: Throwable) { trace("init-error:${t.javaClass.simpleName}", false); Toast.makeText(this, "ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show(); finish() } }
 
-    private fun maybeStartVm(){if(!initialized||!surfaceReady||!nativeSurfaceAttached||!vmStarted.compareAndSet(false,true))return
-        status.text=if(biosOnly)"PS2 • boot BIOS" else "PS2 • booting VM";trace(if(biosOnly)"bios-only-before-run-vm" else "before-run-vm")
-        val bootPath=if(biosOnly)"" else romPath
-        vmThread=Thread({val result=runCatching{NativeApp.runVMThread(bootPath)};val ok=result.getOrDefault(false);trace(if(ok)"vm-returned-ok" else "vm-returned-false",false);runOnUiThread{if(!isFinishing&&!shuttingDown.get()){if(!ok)Toast.makeText(this,if(biosOnly)"BIOS-only boot gagal." else "PS2 gagal boot.",Toast.LENGTH_LONG).show();finish()}}},"armsx2-vm").also{it.start()}
+    private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
+
+    private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1x"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        val bootPath = if (biosOnly) "" else romPath
+        vmThread = Thread({ val result = runCatching { NativeApp.runVMThread(bootPath) }; val ok = result.getOrDefault(false); trace(if (ok) "vm-returned-ok" else "vm-returned-false", false); runOnUiThread { if (!isFinishing && !shuttingDown.get()) { if (!ok) Toast.makeText(this, if (biosOnly) "BIOS-only boot gagal." else "PS2 gagal boot.", Toast.LENGTH_LONG).show(); finish() } } }, "armsx2-vm").also { it.priority = Thread.MAX_PRIORITY; it.start() }
     }
 
-    override fun surfaceCreated(holder:SurfaceHolder){surfaceReady=true;if(initialized)runCatching{attachNativeSurfaceIfReady()};maybeStartVm()}
-    override fun surfaceChanged(holder:SurfaceHolder,format:Int,width:Int,height:Int){surfaceReady=true;surfaceWidth=width;surfaceHeight=height;if(initialized){if(!nativeSurfaceAttached)runCatching{attachNativeSurfaceIfReady()}else runCatching{NativeApp.onNativeSurfaceChanged(holder.surface,width,height)}};maybeStartVm()}
-    override fun surfaceDestroyed(holder:SurfaceHolder){surfaceReady=false;if(initialized&&nativeSurfaceAttached){runCatching{NativeApp.onNativeSurfaceDestroyed()};nativeSurfaceAttached=false}}
-    private fun shutdownCore(){if(!shuttingDown.compareAndSet(false,true))return;if(initialized&&vmStarted.get())runCatching{NativeApp.shutdown()};vmThread?.let{if(it.isAlive&&it!==Thread.currentThread())runCatching{it.join(1000)}};if(initialized&&nativeSurfaceAttached){runCatching{NativeApp.onNativeSurfaceDestroyed()};nativeSurfaceAttached=false};if(!vmStarted.get())trace("closed-before-vm",false)}
-    override fun finish(){shutdownCore();super.finish()};override fun onDestroy(){shutdownCore();super.onDestroy()};@Deprecated("Framework compatibility") override fun onBackPressed(){finish()}
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (initialized && (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK && event.action == MotionEvent.ACTION_MOVE) {
+            sendAxis(event.getAxisValue(MotionEvent.AXIS_X), PAD_L_LEFT, PAD_L_RIGHT)
+            sendAxis(event.getAxisValue(MotionEvent.AXIS_Y), PAD_L_UP, PAD_L_DOWN)
+            sendAxis(event.getAxisValue(MotionEvent.AXIS_Z), PAD_R_LEFT, PAD_R_RIGHT)
+            sendAxis(event.getAxisValue(MotionEvent.AXIS_RZ), PAD_R_UP, PAD_R_DOWN)
+            return true
+        }
+        return super.onGenericMotionEvent(event)
+    }
+
+    private fun sendAxis(value: Float, negativeKey: Int, positiveKey: Int) {
+        val dead = 0.18f
+        val magnitude = min(1f, abs(value))
+        val force = (magnitude * 32766f).toInt()
+        if (value < -dead) { sendPad(negativeKey, true, force); sendPad(positiveKey, false) }
+        else if (value > dead) { sendPad(positiveKey, true, force); sendPad(negativeKey, false) }
+        else { sendPad(negativeKey, false); sendPad(positiveKey, false) }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (initialized && event.repeatCount == 0 && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) {
+            sendPad(keyCode, true); return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_BACK) { finish(); return true }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (initialized && ((event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD || (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)) {
+            sendPad(keyCode, false); return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) { surfaceReady = true; if (initialized) runCatching { attachNativeSurfaceIfReady() }; maybeStartVm() }
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) { surfaceReady = true; surfaceWidth = width; surfaceHeight = height; if (initialized) { if (!nativeSurfaceAttached) runCatching { attachNativeSurfaceIfReady() } else runCatching { NativeApp.onNativeSurfaceChanged(holder.surface, width, height) } }; maybeStartVm() }
+    override fun surfaceDestroyed(holder: SurfaceHolder) { surfaceReady = false; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false } }
+
+    override fun onPause() { if (initialized && vmStarted.get() && !shuttingDown.get()) { runCatching { NativeApp.pause() }; runCatching { NativeApp.flushShaderCache() } }; super.onPause() }
+    override fun onResume() { super.onResume(); if (initialized && vmStarted.get() && !shuttingDown.get()) runCatching { NativeApp.resume() } }
+
+    private fun shutdownCore() { if (!shuttingDown.compareAndSet(false, true)) return; if (initialized) runCatching { NativeApp.resetKeyStatus() }; if (initialized && vmStarted.get()) runCatching { NativeApp.shutdown() }; vmThread?.let { if (it.isAlive && it !== Thread.currentThread()) runCatching { it.join(1500) } }; if (initialized && nativeSurfaceAttached) { runCatching { NativeApp.onNativeSurfaceDestroyed() }; nativeSurfaceAttached = false }; if (!vmStarted.get()) trace("closed-before-vm", false) }
+    override fun finish() { shutdownCore(); super.finish() }
+    override fun onDestroy() { shutdownCore(); super.onDestroy() }
+    @Deprecated("Framework compatibility") override fun onBackPressed() { finish() }
 }
