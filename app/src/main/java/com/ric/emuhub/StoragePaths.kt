@@ -8,15 +8,7 @@ import android.os.Environment
 import android.provider.Settings
 import java.io.File
 
-/**
- * Central storage layout for every internal emulator.
- *
- * Preferred location (when All Files Access is granted on Android 11+):
- *   /storage/emulated/0/emu-hub/
- *
- * If permission is not available yet we fall back to app-specific internal flash so emulation
- * still works. As soon as permission is granted, new data is written to the visible emu-hub root.
- */
+/** Central storage layout for every internal emulator. */
 object StoragePaths {
     private const val ROOT_NAME = "emu-hub"
 
@@ -41,11 +33,22 @@ object StoragePaths {
 
     fun ensureLayout(context: Context): File {
         val root = root(context)
-        listOf(
-            "system", "saves", "states",
-            "PS2", "PS2/bios", "PS2/resources", "PS2/memcards", "PS2/savestates"
-        ).forEach { File(root, it).mkdirs() }
-        migrateLegacyPs2Bios(context, File(root, "PS2/bios"))
+        val system = File(root, "system").apply { mkdirs() }
+        val saves = File(root, "saves").apply { mkdirs() }
+        val states = File(root, "states").apply { mkdirs() }
+        val ps2 = File(root, "PS2").apply { mkdirs() }
+        File(ps2, "bios").mkdirs()
+        File(ps2, "resources").mkdirs()
+        File(ps2, "memcards").mkdirs()
+        File(ps2, "savestates").mkdirs()
+
+        // Preserve data created by older Emu Hub builds before shared storage was introduced.
+        migrateTree(File(context.filesDir, "system"), system)
+        migrateTree(File(context.filesDir, "saves"), saves)
+        File(context.filesDir, "saves").listFiles()?.filter { it.isFile && it.name.endsWith(".state", true) }?.forEach { old ->
+            runCatching { if (!File(states, old.name).exists()) old.copyTo(File(states, old.name), overwrite = false) }
+        }
+        migrateTree(File(context.filesDir, "ps2"), ps2)
         return root
     }
 
@@ -55,13 +58,17 @@ object StoragePaths {
     fun ps2Root(context: Context): File = File(ensureLayout(context), "PS2").apply { mkdirs() }
     fun ps2BiosDir(context: Context): File = File(ensureLayout(context), "PS2/bios").apply { mkdirs() }
 
-    private fun migrateLegacyPs2Bios(context: Context, target: File) {
-        if (target.listFiles()?.any { it.isFile } == true) return
-        val legacy = File(context.filesDir, "ps2/bios")
-        legacy.listFiles()?.filter { it.isFile }?.forEach { old ->
+    private fun migrateTree(source: File, target: File) {
+        if (!source.exists() || source.absolutePath == target.absolutePath) return
+        source.listFiles()?.forEach { old ->
+            val out = File(target, old.name)
             runCatching {
-                val out = File(target, old.name)
-                old.copyTo(out, overwrite = true)
+                if (old.isDirectory) {
+                    out.mkdirs()
+                    migrateTree(old, out)
+                } else if (!out.exists() || out.length() == 0L) {
+                    old.copyTo(out, overwrite = true)
+                }
             }
         }
     }
