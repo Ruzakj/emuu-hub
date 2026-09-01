@@ -1,0 +1,28 @@
+name: Modern Console Library
+
+on:
+  push:
+    paths:
+      - '.github/workflows/modern-library.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  modernize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply modern console library
+        run: python .github/scripts/modern_library.py
+      - name: Remove one-shot migration
+        run: rm .github/workflows/modern-library.yml .github/scripts/modern_library.py
+      - name: Commit modern library
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt .github/workflows/modern-library.yml .github/scripts/modern_library.py
+          git commit -m "Build modern cover-grid console library"
+          git push
