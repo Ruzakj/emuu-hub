@@ -232,7 +232,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
         if (!biosOnly) {
             trace("before-z9x-performance-profile")
-            runCatching { NativeApp.setAffinityMode(7) }
+            runCatching { NativeApp.setAffinityMode(0) }
             runCatching { NativeApp.renderVulkan() }
             runCatching { NativeApp.renderUpscalemultiplier(PS2_UPSCALE) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
@@ -240,8 +240,18 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuFlagHack", "bool", "true") }
-            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-1") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-2") }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
+  // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
+  runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", "false") }
+  // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.
+  runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
+  runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
+  runCatching { NativeApp.setSetting("EmuCore/GS", "UseVSyncForTiming", "bool", "false") }
+  runCatching { NativeApp.setSetting("EmuCore/GS", "SkipDuplicateFrames", "bool", "true") }
+  runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncQueueSize", "int", "1") }
+  // Audio follows emulation speed; avoid host-refresh timing pressure that amplifies crackle during EE/VU spikes.
+  runCatching { NativeApp.setSetting("EmuCore", "CdvdPrecache", "bool", "false") }
             runCatching { NativeApp.commitSettings() }
             runCatching { NativeApp.setAudioVolume(100) }
             @Suppress("DEPRECATION") val hz = windowManager.defaultDisplay.refreshRate
