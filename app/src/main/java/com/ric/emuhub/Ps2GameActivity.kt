@@ -1,10 +1,13 @@
 package com.ric.emuhub
 
 import android.app.Activity
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -22,9 +25,10 @@ import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.min
 
-/** ARMSX2 host tuned for Emu Hub's Snapdragon 6 Gen 1 target. */
+/** ARMSX2 host tuned specifically for Emu Hub's Snapdragon 6 Gen 1 / Adreno 710 target. */
 class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     companion object {
         const val EXTRA_BIOS_ONLY = "biosOnly"
@@ -32,7 +36,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
 
-        // ARMSX2 Android-native analog pseudo key codes used by upstream MainActivity.
         private const val PAD_L_UP = 110
         private const val PAD_L_RIGHT = 111
         private const val PAD_L_DOWN = 112
@@ -98,7 +101,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun control(text: String, keyCode: Int, size: Int = 54): Button = Button(this).apply {
-        this.text = text; textSize = 16f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded();
+        this.text = text; textSize = 16f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded()
         setPadding(0, 0, 0, 0); minWidth = 0; minHeight = 0
         setOnTouchListener { v, e ->
             when (e.actionMasked) {
@@ -116,38 +119,77 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         })
     }
 
+    /** True analog touch stick: circular base + freely moving knob, not four digital buttons. */
+    private inner class AnalogStickView : View(this@Ps2GameActivity) {
+        private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(105, 24, 24, 24); style = Paint.Style.FILL }
+        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat() }
+        private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(175, 150, 150, 150); style = Paint.Style.FILL }
+        private var knobX = 0f
+        private var knobY = 0f
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val cx = width / 2f; val cy = height / 2f
+            val outer = min(width, height) * 0.46f
+            val knob = outer * 0.42f
+            canvas.drawCircle(cx, cy, outer, basePaint)
+            canvas.drawCircle(cx, cy, outer, ringPaint)
+            canvas.drawCircle(cx + knobX, cy + knobY, knob, knobPaint)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    val cx = width / 2f; val cy = height / 2f
+                    var dx = event.x - cx; var dy = event.y - cy
+                    val limit = min(width, height) * 0.36f
+                    val dist = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                    if (dist > limit && dist > 0f) { val scale = limit / dist; dx *= scale; dy *= scale }
+                    knobX = dx; knobY = dy
+                    val nx = (dx / limit).coerceIn(-1f, 1f)
+                    val ny = (dy / limit).coerceIn(-1f, 1f)
+                    sendAnalogPair(nx, PAD_L_LEFT, PAD_L_RIGHT)
+                    sendAnalogPair(ny, PAD_L_UP, PAD_L_DOWN)
+                    invalidate()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    knobX = 0f; knobY = 0f
+                    sendPad(PAD_L_LEFT, false); sendPad(PAD_L_RIGHT, false)
+                    sendPad(PAD_L_UP, false); sendPad(PAD_L_DOWN, false)
+                    invalidate()
+                }
+            }
+            return true
+        }
+    }
+
     private fun buildGameUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         surface = SurfaceView(this).also { it.holder.addCallback(this) }
         root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         status = TextView(this).apply {
-            text = if (biosOnly) "PS2 • BIOS" else "PS2 • PERFORMANCE"
+            text = if (biosOnly) "PS2 • BIOS" else "PS2 • Z9X PERFORMANCE"
             textSize = 10f; setTextColor(0xFFD0D0D0.toInt()); setBackgroundColor(0x77000000); setPadding(dp(9), dp(5), dp(9), dp(5))
         }
         root.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
         addControl(root, Button(this).apply { text = "EXIT"; textSize = 10f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 10, w = 66, h = 38)
 
         if (!biosOnly) {
-            // Shoulder buttons.
             addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 48), Gravity.TOP or Gravity.START, left = 10, top = 8, w = 48, h = 40)
             addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 48), Gravity.TOP or Gravity.START, left = 64, top = 8, w = 48, h = 40)
             addControl(root, control("R1", KeyEvent.KEYCODE_BUTTON_R1, 48), Gravity.TOP or Gravity.END, right = 118, top = 8, w = 48, h = 40)
             addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 48), Gravity.TOP or Gravity.END, right = 64, top = 8, w = 48, h = 40)
 
-            // D-pad, bottom-left.
+            // D-pad remains digital, as on a real DualShock 2.
             addControl(root, control("▲", KeyEvent.KEYCODE_DPAD_UP), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 126)
             addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
             addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
             addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
 
-            // Left analog quick pad. Using upstream ARMSX2 pseudo-key codes avoids SDL JNI.
-            addControl(root, control("L▲", PAD_L_UP, 44), Gravity.BOTTOM or Gravity.START, left = 232, bottom = 116, w = 44, h = 44)
-            addControl(root, control("L▼", PAD_L_DOWN, 44), Gravity.BOTTOM or Gravity.START, left = 232, bottom = 24, w = 44, h = 44)
-            addControl(root, control("L◀", PAD_L_LEFT, 44), Gravity.BOTTOM or Gravity.START, left = 186, bottom = 70, w = 44, h = 44)
-            addControl(root, control("L▶", PAD_L_RIGHT, 44), Gravity.BOTTOM or Gravity.START, left = 278, bottom = 70, w = 44, h = 44)
+            // Circular left analog stick with continuous strength/direction.
+            addControl(root, AnalogStickView(), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
 
-            // PS face layout, bottom-right. Android A/B/X/Y map upstream to Cross/Circle/Square/Triangle.
             addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
             addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
             addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
@@ -165,6 +207,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             if (analogForce > 0) analogForce else (90f * 32766f / 100f).toInt()
         } else 0
         runCatching { NativeApp.setPadButton(keyCode, force, pressed) }
+    }
+
+    private fun sendAnalogPair(value: Float, negativeKey: Int, positiveKey: Int) {
+        val dead = 0.10f
+        val magnitude = min(1f, abs(value))
+        val force = (magnitude * 32766f).toInt()
+        if (value < -dead) { sendPad(negativeKey, true, force); sendPad(positiveKey, false) }
+        else if (value > dead) { sendPad(positiveKey, true, force); sendPad(negativeKey, false) }
+        else { sendPad(negativeKey, false); sendPad(positiveKey, false) }
     }
 
     private fun prepareRuntime() {
@@ -187,17 +238,29 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         NativeApp.initialize(dataRoot.absolutePath, biosDir.absolutePath, Build.VERSION.SDK_INT)
         trace(if (biosOnly) "bios-only-after-initialize" else "after-initialize")
 
-        // Conservative Z9x profile first: Vulkan + native resolution + scheduler hints.
         if (!biosOnly) {
-            trace("before-performance-profile")
+            trace("before-z9x-performance-profile")
+            // Snapdragon 6 Gen 1: keep EE/VU/GS on the A78 performance cluster.
+            runCatching { NativeApp.setAffinityMode(7) }
             runCatching { NativeApp.renderVulkan() }
             runCatching { NativeApp.renderUpscalemultiplier(1.0f) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
+
+            // Timing-safe speedhacks: enable MTVU + idle/INTC/VU optimizations, but avoid
+            // EE underclock and VU cycle stealing so God Hand does not gain artificial slow-motion.
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "IntcStat", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuFlagHack", "bool", "true") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "0") }
+            runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
+            runCatching { NativeApp.commitSettings() }
+
             runCatching { NativeApp.setAudioVolume(100) }
             @Suppress("DEPRECATION") val hz = windowManager.defaultDisplay.refreshRate
             if (hz > 0f) runCatching { NativeApp.setDisplayRefreshRate(hz) }
             runCatching { NativeApp.resetKeyStatus() }
-            trace("performance-profile-ready")
+            trace("z9x-performance-profile-ready")
         }
         initialized = true; attachNativeSurfaceIfReady(); maybeStartVm()
     } catch (t: Throwable) { trace("init-error:${t.javaClass.simpleName}", false); Toast.makeText(this, "ARMSX2 init gagal: ${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show(); finish() } }
@@ -205,29 +268,26 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1x"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
-        vmThread = Thread({ val result = runCatching { NativeApp.runVMThread(bootPath) }; val ok = result.getOrDefault(false); trace(if (ok) "vm-returned-ok" else "vm-returned-false", false); runOnUiThread { if (!isFinishing && !shuttingDown.get()) { if (!ok) Toast.makeText(this, if (biosOnly) "BIOS-only boot gagal." else "PS2 gagal boot.", Toast.LENGTH_LONG).show(); finish() } } }, "armsx2-vm").also { it.priority = Thread.MAX_PRIORITY; it.start() }
+        vmThread = Thread({
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
+            val result = runCatching { NativeApp.runVMThread(bootPath) }
+            val ok = result.getOrDefault(false)
+            trace(if (ok) "vm-returned-ok" else "vm-returned-false", false)
+            runOnUiThread { if (!isFinishing && !shuttingDown.get()) { if (!ok) Toast.makeText(this, if (biosOnly) "BIOS-only boot gagal." else "PS2 gagal boot.", Toast.LENGTH_LONG).show(); finish() } }
+        }, "armsx2-vm").also { it.priority = Thread.MAX_PRIORITY; it.start() }
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (initialized && (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK && event.action == MotionEvent.ACTION_MOVE) {
-            sendAxis(event.getAxisValue(MotionEvent.AXIS_X), PAD_L_LEFT, PAD_L_RIGHT)
-            sendAxis(event.getAxisValue(MotionEvent.AXIS_Y), PAD_L_UP, PAD_L_DOWN)
-            sendAxis(event.getAxisValue(MotionEvent.AXIS_Z), PAD_R_LEFT, PAD_R_RIGHT)
-            sendAxis(event.getAxisValue(MotionEvent.AXIS_RZ), PAD_R_UP, PAD_R_DOWN)
+            sendAnalogPair(event.getAxisValue(MotionEvent.AXIS_X), PAD_L_LEFT, PAD_L_RIGHT)
+            sendAnalogPair(event.getAxisValue(MotionEvent.AXIS_Y), PAD_L_UP, PAD_L_DOWN)
+            sendAnalogPair(event.getAxisValue(MotionEvent.AXIS_Z), PAD_R_LEFT, PAD_R_RIGHT)
+            sendAnalogPair(event.getAxisValue(MotionEvent.AXIS_RZ), PAD_R_UP, PAD_R_DOWN)
             return true
         }
         return super.onGenericMotionEvent(event)
-    }
-
-    private fun sendAxis(value: Float, negativeKey: Int, positiveKey: Int) {
-        val dead = 0.18f
-        val magnitude = min(1f, abs(value))
-        val force = (magnitude * 32766f).toInt()
-        if (value < -dead) { sendPad(negativeKey, true, force); sendPad(positiveKey, false) }
-        else if (value > dead) { sendPad(positiveKey, true, force); sendPad(negativeKey, false) }
-        else { sendPad(negativeKey, false); sendPad(positiveKey, false) }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
