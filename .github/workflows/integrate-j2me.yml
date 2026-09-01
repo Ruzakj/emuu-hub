@@ -52,8 +52,10 @@ jobs:
           s=p.read_text()
           s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
           s=s.replace('        applicationId = "ru.woesss.j2meloader"\n', '')
+          s=s.replace('        targetSdk = rootProject.extra["targetSdk"] as Int\n', '')
           s=s.replace('        versionCode = 48\n', '')
           s=s.replace('        versionName = "0.87.1"\n', '')
+          s=s.replace('    @Suppress("UnstableApiUsage")\n    androidResources.generateLocaleConfig = true\n\n', '')
           s=s.replace('        minSdk = rootProject.extra["minSdk"] as Int\n', '        minSdk = rootProject.extra["minSdk"] as Int\n        buildConfigField("String", "VERSION_NAME", "\\\"0.89.0-emuhub\\\"")\n')
           s=s.replace('        release {\n            isMinifyEnabled = true\n            isShrinkResources = true\n        }', '        release {\n            isMinifyEnabled = false\n        }')
           s=s.replace('            applicationIdSuffix = ".debug"\n', '')
@@ -117,6 +119,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main || true
           git add j2me-build.log
           git commit -m "Capture JL-Mod integration build failure" || true
           git push || true
@@ -139,6 +142,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
           git add app/libs/jlmod-runtime.aar app/libs/jlmod-dexlib.aar app/src/main/java/com/ric/emuhub/MainActivity.kt
           git commit -m "Embed JL-Mod runtime for J2ME" || exit 0
           git push
