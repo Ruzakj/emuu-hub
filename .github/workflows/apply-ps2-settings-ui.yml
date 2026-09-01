@@ -1,0 +1,54 @@
+name: Apply PS2 Manual Settings
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-ps2-settings-ui.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Patch PS2 settings
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          old='quickTop.addView(actionTile("PS2","BIOS","Setup / test PS2 BIOS") {'
+          new='quickTop.addView(actionTile("PS2","SETTINGS","Manual tuning / BIOS") {\n            startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java))\n        },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})\n        /* legacy BIOS entry is now inside PS2 Settings */\n        /* '
+          if old not in s: raise SystemExit('MainActivity anchor missing')
+          start=s.index(old)
+          end=s.index('        },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})', start)+len('        },LinearLayout.LayoutParams(0,dp(104),1f).apply{leftMargin=dp(5)})')
+          s=s[:start]+new+s[end:]
+          p.write_text(s)
+
+          m=Path('app/src/main/AndroidManifest.xml')
+          x=m.read_text()
+          anchor='        <activity android:name=".Ps2BiosActivity" android:screenOrientation="portrait" />'
+          if '.Ps2SettingsActivity' not in x:
+            x=x.replace(anchor, '        <activity android:name=".Ps2SettingsActivity" android:screenOrientation="portrait" />\n'+anchor)
+          m.write_text(x)
+
+          g=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s=g.read_text()
+          old='''            trace("before-z9x-performance-profile")\n            runCatching { NativeApp.setAffinityMode(0) }\n            runCatching { NativeApp.renderVulkan() }\n            runCatching { NativeApp.renderUpscalemultiplier(PS2_UPSCALE) }'''
+          if old not in s:
+            old='''            trace("before-z9x-performance-profile")\n            runCatching { NativeApp.setAffinityMode(7) }\n            runCatching { NativeApp.renderVulkan() }\n            runCatching { NativeApp.renderUpscalemultiplier(PS2_UPSCALE) }'''
+          new='''            trace("before-z9x-performance-profile")\n            val profile = Ps2Settings.load(this)\n            runCatching { NativeApp.setAffinityMode(profile.affinity) }\n            runCatching { NativeApp.renderVulkan() }\n            runCatching { NativeApp.renderUpscalemultiplier(profile.upscale) }'''
+          if old not in s: raise SystemExit('Ps2Game profile anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace('NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", "true")','NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", profile.mtvu.toString())',1)
+          import re
+          s=re.sub(r'NativeApp\.setSetting\("EmuCore/Speedhacks", "EECycleRate", "int", "-?\d+"\)', 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", profile.eeRate.toString())', s, count=1)
+          s=re.sub(r'NativeApp\.setSetting\("EmuCore/Speedhacks", "EECycleSkip", "int", "\d+"\)', 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", profile.eeSkip.toString())', s, count=1)
+          s=s.replace('status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • PERF CORES"', 'status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan ${Ps2Settings.load(this).upscale}x • ${Ps2Settings.load(this).preset}"')
+          g.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main
+          git commit -m "Add manual PS2 settings for Z9x" || exit 0
+          git push
