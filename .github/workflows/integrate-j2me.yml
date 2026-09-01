@@ -34,6 +34,15 @@ jobs:
           cd /tmp/jlmod
           git checkout f723a190c0bdb44b31c3bc0ead6f8665c7ea517d
           git submodule update --init --recursive
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('gradle/libs.versions.toml')
+          s=p.read_text()
+          s=s.replace('kotlin = "2.2.10"', 'kotlin = "2.0.21"')
+          p.write_text(s)
+          PY
+
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/javax/microedition/util/ContextHolder.java')
@@ -143,6 +152,6 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/libs/jlmod-runtime.aar app/libs/jlmod-dexlib.aar app/src/main/java/com/ric/emuhub/MainActivity.kt
-          git commit -m "Embed JL-Mod runtime for J2ME" || exit 0
+          git commit -m "Rebuild JL-Mod runtime with Kotlin 2.0.21" || exit 0
           git pull --rebase origin main
           git push
