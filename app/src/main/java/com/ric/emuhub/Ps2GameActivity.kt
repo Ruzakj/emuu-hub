@@ -15,8 +15,6 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import kr.co.iefriends.pcsx2.NativeApp
-import org.libsdl.app.SDL
-import org.libsdl.app.SDLControllerManager
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -27,7 +25,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
-        private val sdlReady = AtomicBoolean(false)
     }
 
     private lateinit var surface: SurfaceView
@@ -104,22 +101,15 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
     private fun copyAssetTree(assetPath:String,target:File){val children=assets.list(assetPath).orEmpty();if(children.isEmpty()){target.parentFile?.mkdirs();assets.open(assetPath).use{i->target.outputStream().use{i.copyTo(it)}};return};target.mkdirs();children.forEach{copyAssetTree("$assetPath/$it",File(target,it))}}
 
-    private fun initializeSdlBridge() {
-        if (sdlReady.get()) return
-        trace("before-sdl-setup")
-        SDL.setContext(this)
-        SDLControllerManager.nativeSetupJNI()
-        SDLControllerManager.initialize()
-        sdlReady.set(true)
-        trace("after-sdl-setup")
-    }
-
     private fun initializeCore(dataRoot:File,biosDir:File){if(initialized||isFinishing)return;try{
         status.text="PS2 • native load"
         trace("before-native-load")
         if(!NativeApp.loadNative(this)) error("Native ARMSX2 gagal dimuat: ${NativeApp.nativeLoadError}")
         trace("after-native-load")
-        initializeSdlBridge()
+        // First-frame mode intentionally skips SDLControllerManager.nativeSetupJNI().
+        // The embedded ARMSX2 build bypasses SDL's standalone Android JNI registration,
+        // and controller registration is not required to initialize/boot the PS2 VM.
+        trace("sdl-setup-skipped")
         status.text="PS2 • initialize";trace(if(biosOnly)"bios-only-before-initialize" else "before-initialize");NativeApp.initialize(dataRoot.absolutePath,biosDir.absolutePath,Build.VERSION.SDK_INT);trace(if(biosOnly)"bios-only-after-initialize" else "after-initialize")
         trace("renderer-auto-default")
         initialized=true;attachNativeSurfaceIfReady();maybeStartVm()
