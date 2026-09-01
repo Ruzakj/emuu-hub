@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
@@ -339,30 +341,57 @@ class MainActivity : Activity() {
     private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"Nintendo Entertainment System • FCEUmm";"sfc","smc"->"Super Nintendo • Snes9x";"bin","cue"->"PlayStation • PCSX-ReARMed";"chd"->"PlayStation / PS2 • choose engine";"ecm"->"PlayStation • ECM auto decode";"iso"->"PS1 / PSP / PS2 • choose engine";"cso"->"PSP • PPSSPP";"xci","nsp","nro"->"Nintendo Switch • Eden Optimized";in ARCHIVES->"Compressed ROM • temporary auto extract";else->"ROM"}
     private fun cacheKey(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}.take(24)
 
-    private fun decodeAndLaunchEcm(uri:Uri,name:String){status.text="Preparing ECM...";scanExecutor.execute{try{val dir=File(cacheDir,"ecm").apply{mkdirs()};val key=cacheKey(uri.toString());val source=File(dir,"$key.ecm");val decoded=File(dir,"$key.bin");if(!decoded.exists()||decoded.length()==0L){runOnUiThread{status.text="Decompressing ECM • $name"};contentResolver.openInputStream(uri)?.use{input->source.outputStream().use{input.copyTo(it)}}?:error("ECM tidak dapat dibaca");if(!NativeBridge.decodeEcm(source.absolutePath,decoded.absolutePath))error("ECM corrupt / decode gagal")};source.delete();runOnUiThread{status.text="ECM ready • launching PS1";launchInternalFile(decoded,"pcsx",name.removeSuffix(".ecm"))}}catch(e:Exception){runOnUiThread{status.text="ECM decode failed";Toast.makeText(this,"ECM gagal dibuka: ${e.message}",Toast.LENGTH_LONG).show()}}}}
-    private fun launchInternalFile(file:File,core:String,name:String){startActivity(Intent(this,GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("coreId",core).putExtra("romName",name))}
-    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){try{status.text="Opening $name...";val dir=File(cacheDir,"roms").apply{mkdirs()};val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_");val out=File(dir,safe);contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("ROM tidak dapat dibaca");launchInternalFile(out,forcedCore?:coreIdFor(ext),name)}catch(e:Exception){status.text="Failed to open ROM • ${e.message}"}}
-    private fun copyAndLaunchPs2(uri:Uri,name:String){
+    /** Resolve Storage Access Framework URIs to their real storage path.
+     * Normal game images are launched in place; only archives/transform formats use cache. */
+    private fun directGameFile(uri:Uri):File?{
+        if(uri.scheme=="file")return uri.path?.let(::File)?.takeIf{it.isFile&&it.canRead()}
+        if(uri.scheme!="content")return null
+        return runCatching{
+            if(uri.authority=="com.android.externalstorage.documents"&&DocumentsContract.isDocumentUri(this,uri)){
+                val id=DocumentsContract.getDocumentId(uri)
+                if(id.startsWith("raw:"))return@runCatching File(id.removePrefix("raw:")).takeIf{it.isFile&&it.canRead()}
+                val parts=id.split(':',limit=2)
+                if(parts.size==2){
+                    val base=if(parts[0].equals("primary",true))Environment.getExternalStorageDirectory() else File("/storage/${parts[0]}")
+                    return@runCatching File(base,parts[1]).takeIf{it.isFile&&it.canRead()}
+                }
+            }
+            null
+        }.getOrNull()
+    }
+
+    private fun launchDirectInternal(uri:Uri,name:String,ext:String,forcedCore:String?){
+        val file=directGameFile(uri)
+        if(file==null){
+            status.text="Direct ROM path unavailable"
+            Toast.makeText(this,"ROM harus berada di penyimpanan internal/SD yang bisa diakses langsung. File game tidak akan dicopy ke cache.",Toast.LENGTH_LONG).show()
+            return
+        }
+        status.text="Opening directly • $name"
+        launchInternalFile(file,forcedCore?:coreIdFor(ext),name)
+    }
+
+    private fun launchDirectPs2(uri:Uri,name:String){
         if(Ps2BiosActivity.selectedBios(this)==null){
             status.text="PS2 BIOS belum siap"
             Toast.makeText(this,"Setup BIOS PS2 dulu.",Toast.LENGTH_LONG).show()
             startActivity(Intent(this,Ps2BiosActivity::class.java))
             return
         }
-        status.text="Preparing PS2 • $name"
-        scanExecutor.execute{
-            try{
-                val dir=File(cacheDir,"ps2roms").apply{mkdirs()}
-                val safe=name.replace(Regex("[^A-Za-z0-9._ -]"),"_")
-                val out=File(dir,safe)
-                contentResolver.openInputStream(uri)?.use{input->out.outputStream().use{input.copyTo(it)}}?:error("PS2 ROM tidak dapat dibaca")
-                runOnUiThread{
-                    status.text="PS2 • ARMSX2 Vulkan"
-                    startActivity(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",out.absolutePath).putExtra("romName",name))
-                }
-            }catch(e:Exception){runOnUiThread{status.text="PS2 gagal disiapkan";Toast.makeText(this,"PS2 gagal: ${e.message}",Toast.LENGTH_LONG).show()}}
+        val file=directGameFile(uri)
+        if(file==null){
+            status.text="PS2 direct path unavailable"
+            Toast.makeText(this,"ISO/CHD PS2 tidak dicopy ke cache. Simpan game di penyimpanan internal/SD lalu tambahkan foldernya ke Emu Hub.",Toast.LENGTH_LONG).show()
+            return
         }
+        status.text="PS2 • direct storage • ARMSX2 Vulkan"
+        startActivity(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("romName",name))
     }
+
+    private fun decodeAndLaunchEcm(uri:Uri,name:String){status.text="Preparing ECM...";scanExecutor.execute{try{val dir=File(cacheDir,"ecm").apply{mkdirs()};val key=cacheKey(uri.toString());val source=File(dir,"$key.ecm");val decoded=File(dir,"$key.bin");if(!decoded.exists()||decoded.length()==0L){runOnUiThread{status.text="Decompressing ECM • $name"};contentResolver.openInputStream(uri)?.use{input->source.outputStream().use{input.copyTo(it)}}?:error("ECM tidak dapat dibaca");if(!NativeBridge.decodeEcm(source.absolutePath,decoded.absolutePath))error("ECM corrupt / decode gagal")};source.delete();runOnUiThread{status.text="ECM ready • launching PS1";launchInternalFile(decoded,"pcsx",name.removeSuffix(".ecm"))}}catch(e:Exception){runOnUiThread{status.text="ECM decode failed";Toast.makeText(this,"ECM gagal dibuka: ${e.message}",Toast.LENGTH_LONG).show()}}}}
+    private fun launchInternalFile(file:File,core:String,name:String){startActivity(Intent(this,GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("coreId",core).putExtra("romName",name))}
+    private fun copyAndLaunchInternal(uri:Uri,name:String,ext:String,forcedCore:String?){launchDirectInternal(uri,name,ext,forcedCore)}
+    private fun copyAndLaunchPs2(uri:Uri,name:String){launchDirectPs2(uri,name)}
     private fun coreIdFor(ext:String)=when(ext){"nes"->"fceumm";"sfc","smc"->"snes9x";"bin","cue","chd"->"pcsx";"cso"->"ppsspp";else->"mgba"}
 
     private fun saveCache(games:List<GameEntry>){val arr=JSONArray();games.forEach{g->arr.put(JSONObject().put("u",g.uri).put("n",g.name).put("e",g.ext).put("f",g.folder))};prefs.edit().putString(KEY_LIBRARY_CACHE,arr.toString()).apply()}
