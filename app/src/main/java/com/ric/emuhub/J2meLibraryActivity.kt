@@ -48,7 +48,7 @@ class J2meLibraryActivity : Activity() {
         header.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(tv("JAVA / J2ME", 23f, 0xFFFFFFFF.toInt(), true))
-            addView(tv("JL-Mod internal runtime", 10.5f, 0xFF777777.toInt()))
+            addView(tv("JL-Mod internal runtime • direct", 10.5f, 0xFF777777.toInt()))
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(header)
 
