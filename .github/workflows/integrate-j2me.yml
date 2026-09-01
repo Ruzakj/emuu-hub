@@ -16,147 +16,144 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch Emu Hub for embedded JL-Mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install JL-Mod toolchain
         run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "ndk;22.1.7171670"
+
+      - name: Build embedded JL-Mod AARs
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/jlmod
+          git clone --recursive https://github.com/woesss/JL-Mod.git /tmp/jlmod
+          cd /tmp/jlmod
+          git checkout f723a190c0bdb44b31c3bc0ead6f8665c7ea517d
+          git submodule update --init --recursive
+
           python3 - <<'PY'
           from pathlib import Path
-
-          # repositories: JitPack is required by several JL-Mod runtime dependencies.
-          p=Path('settings.gradle.kts')
+          p=Path('app/src/main/java/javax/microedition/util/ContextHolder.java')
           s=p.read_text()
-          if 'maven("https://jitpack.io")' not in s:
-              s=s.replace('mavenCentral()\n    }\n}', 'mavenCentral()\n        maven("https://jitpack.io")\n    }\n}')
+          s=s.replace('private static Display display;', 'private static Context emuHubContext;\n\tprivate static Display display;')
+          s=s.replace('public static Context getAppContext() {\n\t\treturn EmulatorApplication.getInstance();\n\t}', 'public static void init(Context context) { emuHubContext = context.getApplicationContext(); }\n\n\tpublic static Context getAppContext() {\n\t\treturn emuHubContext != null ? emuHubContext : EmulatorApplication.getInstance();\n\t}')
           p.write_text(s)
-
-          # Runtime AARs are produced during CI before Emu Hub Gradle starts.
-          p=Path('app/build.gradle.kts')
+          p=Path('app/src/main/java/ru/playsoftware/j2meloader/config/Config.java')
           s=p.read_text()
-          marker='    implementation("org.tukaani:xz:1.10")\n'
-          deps='''    implementation(files("libs/jlmod-runtime.aar"))\n    implementation(files("libs/jlmod-dexlib.aar"))\n    implementation("androidx.activity:activity-ktx:1.8.2")\n    implementation("androidx.arch.core:core-common:2.2.0")\n    implementation("androidx.collection:collection-ktx:1.3.0")\n    implementation("androidx.concurrent:concurrent-futures:1.1.0")\n    implementation("androidx.constraintlayout:constraintlayout:2.1.4")\n    implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")\n    implementation("androidx.fragment:fragment-ktx:1.6.2")\n    implementation("androidx.lifecycle:lifecycle-common:2.6.2")\n    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.2")\n    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")\n    implementation("androidx.multidex:multidex:2.0.1")\n    implementation("androidx.preference:preference-ktx:1.2.1")\n    implementation("androidx.recyclerview:recyclerview:1.3.2")\n    implementation("androidx.room:room-runtime:2.6.1")\n    implementation("androidx.room:room-rxjava2:2.6.1")\n    implementation("androidx.transition:transition:1.4.1")\n    implementation("com.google.code.gson:gson:2.9.1")\n    implementation("com.google.oboe:oboe:1.7.0")\n    implementation("ch.acra:acra-http:5.11.3")\n    implementation("com.github.yukuku:ambilwarna:2.0.1")\n    implementation("com.github.penn5:donations:3.6.0")\n    implementation("com.github.nikita36078:mobile-ffmpeg:v4.3.2-compact")\n    implementation("com.github.woesss:filepicker:4.4.0")\n    implementation("com.github.nikita36078:pngj:2.2.3")\n    implementation("io.reactivex.rxjava2:rxandroid:2.1.1")\n    implementation("net.lingala.zip4j:zip4j:2.11.5")\n    implementation("org.ow2.asm:asm:9.6")\n'''
-          if 'libs/jlmod-runtime.aar' not in s:
-              s=s.replace(marker, marker+deps)
-          p.write_text(s)
-
-          # Initialize JL-Mod ContextHolder from Emu Hub's Application in every process.
-          p=Path('app/src/main/java/com/ric/emuhub/EmuHubApp.kt')
-          s=p.read_text()
-          if 'ContextHolder.init(this)' not in s:
-              s=s.replace('        super.onCreate()\n', '        super.onCreate()\n        runCatching { javax.microedition.util.ContextHolder.init(this) }\n')
-          p.write_text(s)
-
-          # Add an internal Java/J2ME library browser. Existing /Java/converted is read directly.
-          j=Path('app/src/main/java/com/ric/emuhub/J2meLibraryActivity.kt')
-          j.write_text(r'''package com.ric.emuhub
-
-import android.app.Activity
-import android.graphics.BitmapFactory
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.os.Bundle
-import android.os.Environment
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
-import ru.playsoftware.j2meloader.config.Config
-import java.io.File
-import java.util.concurrent.Executors
-
-class J2meLibraryActivity : Activity() {
-    private val worker = Executors.newSingleThreadExecutor()
-    private lateinit var list: LinearLayout
-    private lateinit var status: TextView
-    private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
-    private fun rounded(color:Int,r:Int,stroke:Int?=null)=GradientDrawable().apply{setColor(color);cornerRadius=dp(r).toFloat();if(stroke!=null)setStroke(dp(1),stroke)}
-    private fun tv(t:String,sp:Float,c:Int,b:Boolean=false)=TextView(this).apply{text=t;textSize=sp;setTextColor(c);includeFontPadding=false;if(b)setTypeface(typeface,Typeface.BOLD)}
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.statusBarColor=0xFF000000.toInt();window.navigationBarColor=0xFF000000.toInt()
-        val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xFF000000.toInt());setPadding(dp(18),dp(16),dp(18),dp(12))}
-        val header=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        val back=tv("‹",36f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;setPadding(dp(6),0,dp(14),0);setOnClickListener{finish()}}
-        header.addView(back,LinearLayout.LayoutParams(dp(48),dp(52)))
-        val title=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;addView(tv("JAVA / J2ME",23f,0xFFFFFFFF.toInt(),true));addView(tv("JL-Mod internal runtime",10.5f,0xFF777777.toInt()))}
-        header.addView(title,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));root.addView(header)
-        status=tv("Scanning /storage/emulated/0/Java/converted…",11f,0xFF8A8A8A.toInt())
-        root.addView(status,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(8);bottomMargin=dp(10)})
-        val scroll=ScrollView(this).apply{isFillViewport=true;overScrollMode=View.OVER_SCROLL_NEVER}
-        list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f));setContentView(root)
-        scan()
-    }
-
-    private fun scan(){
-        worker.execute{
-            @Suppress("DEPRECATION") val javaRoot=File(Environment.getExternalStorageDirectory(),"Java")
-            val converted=File(javaRoot,"converted")
-            val games=converted.listFiles()?.filter{it.isDirectory && File(it,"converted.zip").isFile && File(it,"res.jar").isFile}?.sortedBy{it.name.lowercase()}.orEmpty()
-            runOnUiThread{
-                list.removeAllViews();status.text="${games.size} game • ${converted.absolutePath}"
-                if(games.isEmpty()){
-                    list.addView(tv("Folder converted belum ditemukan atau belum bisa dibaca.",13f,0xFFAAAAAA.toInt()).apply{setPadding(dp(12),dp(24),dp(12),dp(24))});return@runOnUiThread
-                }
-                games.forEach{addGame(it)}
-            }
-        }
-    }
-
-    private fun addGame(dir:File){
-        val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(10),dp(10),dp(12),dp(10));background=rounded(0xFF080808.toInt(),16,0xFF1B1B1B.toInt());isClickable=true;isFocusable=true}
-        val icon=ImageView(this).apply{scaleType=ImageView.ScaleType.CENTER_CROP;background=rounded(0xFF141414.toInt(),11)}
-        val iconFile=File(dir,"icon.png");if(iconFile.isFile)runCatching{setImageBitmap(BitmapFactory.decodeFile(iconFile.absolutePath))}
-        row.addView(icon,LinearLayout.LayoutParams(dp(58),dp(58)))
-        val texts=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(13),0,0,0);addView(tv(dir.name,14f,0xFFF4F4F4.toInt(),true).apply{maxLines=2});addView(tv("J2ME • converted.zip",10f,0xFF737373.toInt()),LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(5)})}
-        row.addView(texts,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-        row.setOnClickListener{
-            runCatching{Config.startApp(this,dir.name,dir.absolutePath)}.onFailure{Toast.makeText(this,"J2ME gagal start: ${it.message}",Toast.LENGTH_LONG).show()}
-        }
-        list.addView(row,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{bottomMargin=dp(8)})
-    }
-
-    override fun onDestroy(){worker.shutdownNow();super.onDestroy()}
-}
-''')
-
-          # Register J2ME activity; JL-Mod AAR contributes MicroActivity + ConfigActivity.
-          p=Path('app/src/main/AndroidManifest.xml')
-          s=p.read_text()
-          if '.J2meLibraryActivity' not in s:
-              s=s.replace('<activity android:name=".Ps2SettingsActivity"', '<activity android:name=".J2meLibraryActivity" android:screenOrientation="unspecified" />\n        <activity android:name=".Ps2SettingsActivity"')
-          p.write_text(s)
-
-          # Add JAVA to the console strip and route it to the embedded browser.
-          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
-          s=p.read_text()
-          old='Triple("SNES","Snes9x","CORE"),Triple("SWITCH","Eden","EXT")'
-          new='Triple("SNES","Snes9x","CORE"),Triple("JAVA","JL-Mod","INT"),Triple("SWITCH","Eden","EXT")'
-          if old in s:s=s.replace(old,new)
-          needle='''                if(item.first=="PS2"){\n                    isClickable=true;isFocusable=true\n                    setOnClickListener{\n                        status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • tap to change" else "PS2 BIOS setup • pilih BIOS dulu"\n                        startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))\n                    }\n                }'''
-          repl=needle+'''\n                if(item.first=="JAVA"){\n                    isClickable=true;isFocusable=true\n                    setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}\n                }'''
-          if 'if(item.first=="JAVA")' not in s and needle in s:s=s.replace(needle,repl)
-          p.write_text(s)
-
-          # Build pipeline: pin JL-Mod source and convert its app module into an AAR library.
-          p=Path('.github/workflows/build-apk.yml')
-          s=p.read_text()
-          s=s.replace('"ndk;27.0.12077973" "cmake;3.22.1"','"ndk;27.0.12077973" "ndk;22.1.7171670" "cmake;3.22.1"')
-          if 'Build embedded JL-Mod J2ME runtime' not in s:
-              insert=r'''\n      - name: Build embedded JL-Mod J2ME runtime\n        run: |\n          set -euxo pipefail\n          rm -rf /tmp/jlmod\n          git clone --recursive https://github.com/woesss/JL-Mod.git /tmp/jlmod\n          cd /tmp/jlmod\n          git checkout f723a190c0bdb44b31c3bc0ead6f8665c7ea517d\n          git submodule update --init --recursive\n          python3 - <<'PYJL'\n          from pathlib import Path\n          p=Path('app/src/main/java/javax/microedition/util/ContextHolder.java')\n          x=p.read_text()\n          x=x.replace('private static Display display;', 'private static android.content.Context emuHubContext;\\n\\tprivate static Display display;')\n          x=x.replace('public static Context getAppContext() {\\n\\t\\treturn EmulatorApplication.getInstance();\\n\\t}', 'public static void init(Context context) { emuHubContext = context.getApplicationContext(); }\\n\\n\\tpublic static Context getAppContext() {\\n\\t\\treturn emuHubContext != null ? emuHubContext : EmulatorApplication.getInstance();\\n\\t}')\n          p.write_text(x)\n          p=Path('app/src/main/java/ru/playsoftware/j2meloader/config/Config.java')\n          x=p.read_text()\n          x=x.replace('String path = preferences.getString(PREF_EMULATOR_DIR, null);\\n\\t\\tif (path == null) path = Environment.getExternalStorageDirectory() + "/" + appName;', 'String path = Environment.getExternalStorageDirectory() + "/Java";')\n          p.write_text(x)\n          Path('app/src/main/AndroidManifest.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n <uses-permission android:name="android.permission.VIBRATE"/>\n <uses-permission android:name="android.permission.INTERNET"/>\n <application>\n  <activity android:name="ru.playsoftware.j2meloader.config.ConfigActivity" android:exported="false" android:windowSoftInputMode="stateHidden"/>\n  <activity android:name="javax.microedition.shell.MicroActivity" android:exported="false" android:theme="@style/AppTheme.NoActionBar" android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode" android:process=":midlet"/>\n  <activity android:name="ru.playsoftware.j2meloader.settings.SettingsActivity" android:exported="false"/>\n  <activity android:name="ru.playsoftware.j2meloader.settings.KeyMapperActivity" android:exported="false"/>\n  <activity android:name="ru.playsoftware.j2meloader.config.ProfilesActivity" android:exported="false"/>\n  <activity android:name="com.nokia.mid.ui.NotificationActivity" android:exported="false"/>\n </application>\n</manifest>\n''')\n          Path('app/build.gradle.kts').write_text(r'''import org.jetbrains.kotlin.gradle.dsl.JvmTarget\nplugins { alias(libs.plugins.android.library); alias(libs.plugins.kotlin.android) }\nandroid {\n compileSdk = rootProject.extra["compileSdk"] as Int\n ndkVersion = rootProject.extra["ndkVersion"] as String\n namespace = "ru.playsoftware.j2meloader"\n defaultConfig { minSdk = rootProject.extra["minSdk"] as Int; resValue("string","app_name","Java"); resValue("string","app_center",""); resValue("string","fingerprint","") }\n buildFeatures { viewBinding=true; prefab=true; buildConfig=true }\n buildTypes { release { isMinifyEnabled=false } }\n flavorDimensions += "default"\n productFlavors { create("emulator") { buildConfigField("boolean","FULL_EMULATOR","true") } }\n externalNativeBuild.ndkBuild.path("src/main/cpp/Android.mk")\n compileOptions { targetCompatibility=JavaVersion.VERSION_17; sourceCompatibility=JavaVersion.VERSION_17 }\n}\nkotlin.compilerOptions.jvmTarget.set(JvmTarget.JVM_17)\ndependencies {\n implementation(projects.dexlib)\n implementation(libs.androidx.activity.ktx); implementation(libs.androidx.appcompat); implementation(libs.androidx.arch.core.common); implementation(libs.androidx.collection); implementation(libs.androidx.concurrent.futures); implementation(libs.androidx.constraintlayout); implementation(libs.androidx.coordinatorlayout); implementation(libs.androidx.core.ktx); implementation(libs.androidx.documentfile); implementation(libs.androidx.fragment.ktx); implementation(libs.androidx.lifecycle.common); implementation(libs.androidx.lifecycle.livedata.ktx); implementation(libs.androidx.lifecycle.runtime.ktx); implementation(libs.androidx.multidex); implementation(libs.androidx.preference.ktx); implementation(libs.androidx.recyclerview); annotationProcessor(libs.androidx.room.compiler); implementation(libs.androidx.room.runtime); implementation(libs.androidx.room.rxjava2); implementation(libs.androidx.transition)\n annotationProcessor(libs.google.auto.service); compileOnly(libs.google.auto.service.annotations); implementation(libs.google.gson); implementation(libs.google.material); implementation(libs.google.oboe); implementation(libs.acra.http); implementation(libs.ambilwarna); implementation(libs.donations); implementation(libs.ffmpeg.mobile); implementation(libs.filepicker); implementation(libs.pngj); implementation(libs.rx.android)\n}\n''')\n          PYJL\n          ./gradlew :app:bundleEmulatorReleaseAar :dexlib:bundleReleaseAar --stacktrace\n          cd "$GITHUB_WORKSPACE"\n          mkdir -p app/libs\n          cp /tmp/jlmod/app/build/outputs/aar/app-emulator-release.aar app/libs/jlmod-runtime.aar\n          cp /tmp/jlmod/dexlib/build/outputs/aar/dexlib-release.aar app/libs/jlmod-dexlib.aar\n          test -s app/libs/jlmod-runtime.aar\n          test -s app/libs/jlmod-dexlib.aar\n'''
-              anchor='      - name: Restore cached mGBA core\n'
-              s=s.replace(anchor,insert+'\n'+anchor)
+          s=s.replace('String path = preferences.getString(PREF_EMULATOR_DIR, null);\n\t\tif (path == null) path = Environment.getExternalStorageDirectory() + "/" + appName;', 'String path = Environment.getExternalStorageDirectory() + "/Java";')
           p.write_text(s)
           PY
 
-      - name: Commit integration
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application>
+                  <activity android:name="ru.playsoftware.j2meloader.config.ConfigActivity" android:exported="false" android:windowSoftInputMode="stateHidden" />
+                  <activity android:name="javax.microedition.shell.MicroActivity" android:exported="false" android:theme="@style/AppTheme.NoActionBar" android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode" android:process=":midlet" />
+                  <activity android:name="ru.playsoftware.j2meloader.settings.SettingsActivity" android:exported="false" />
+                  <activity android:name="ru.playsoftware.j2meloader.settings.KeyMapperActivity" android:exported="false" />
+                  <activity android:name="ru.playsoftware.j2meloader.config.ProfilesActivity" android:exported="false" />
+                  <activity android:name="com.nokia.mid.ui.NotificationActivity" android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+          plugins {
+              alias(libs.plugins.android.library)
+              alias(libs.plugins.kotlin.android)
+          }
+          android {
+              compileSdk = rootProject.extra["compileSdk"] as Int
+              ndkVersion = rootProject.extra["ndkVersion"] as String
+              namespace = "ru.playsoftware.j2meloader"
+              defaultConfig {
+                  minSdk = rootProject.extra["minSdk"] as Int
+                  resValue("string", "app_name", "Java")
+                  resValue("string", "app_center", "")
+                  resValue("string", "fingerprint", "")
+              }
+              buildFeatures { viewBinding = true; prefab = true; buildConfig = true }
+              buildTypes { release { isMinifyEnabled = false } }
+              flavorDimensions += "default"
+              productFlavors { create("emulator") { buildConfigField("boolean", "FULL_EMULATOR", "true") } }
+              externalNativeBuild.ndkBuild.path("src/main/cpp/Android.mk")
+              compileOptions { targetCompatibility = JavaVersion.VERSION_17; sourceCompatibility = JavaVersion.VERSION_17 }
+          }
+          kotlin.compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
+          dependencies {
+              implementation(projects.dexlib)
+              implementation(libs.androidx.activity.ktx)
+              implementation(libs.androidx.appcompat)
+              implementation(libs.androidx.arch.core.common)
+              implementation(libs.androidx.collection)
+              implementation(libs.androidx.concurrent.futures)
+              implementation(libs.androidx.constraintlayout)
+              implementation(libs.androidx.coordinatorlayout)
+              implementation(libs.androidx.core.ktx)
+              implementation(libs.androidx.documentfile)
+              implementation(libs.androidx.fragment.ktx)
+              implementation(libs.androidx.lifecycle.common)
+              implementation(libs.androidx.lifecycle.livedata.ktx)
+              implementation(libs.androidx.lifecycle.runtime.ktx)
+              implementation(libs.androidx.multidex)
+              implementation(libs.androidx.preference.ktx)
+              implementation(libs.androidx.recyclerview)
+              annotationProcessor(libs.androidx.room.compiler)
+              implementation(libs.androidx.room.runtime)
+              implementation(libs.androidx.room.rxjava2)
+              implementation(libs.androidx.transition)
+              annotationProcessor(libs.google.auto.service)
+              compileOnly(libs.google.auto.service.annotations)
+              implementation(libs.google.gson)
+              implementation(libs.google.material)
+              implementation(libs.google.oboe)
+              implementation(libs.acra.http)
+              implementation(libs.ambilwarna)
+              implementation(libs.donations)
+              implementation(libs.ffmpeg.mobile)
+              implementation(libs.filepicker)
+              implementation(libs.pngj)
+              implementation(libs.rx.android)
+          }
+          EOF
+
+          chmod +x gradlew
+          ./gradlew :app:bundleEmulatorReleaseAar :dexlib:bundleReleaseAar --stacktrace
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p app/libs
+          cp /tmp/jlmod/app/build/outputs/aar/app-emulator-release.aar app/libs/jlmod-runtime.aar
+          cp /tmp/jlmod/dexlib/build/outputs/aar/dexlib-release.aar app/libs/jlmod-dexlib.aar
+          test -s app/libs/jlmod-runtime.aar
+          test -s app/libs/jlmod-dexlib.aar
+
+      - name: Add Java console entry
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          s=s.replace('Triple("SNES","Snes9x","CORE"),Triple("SWITCH","Eden","EXT")', 'Triple("SNES","Snes9x","CORE"),Triple("JAVA","JL-Mod","INT"),Triple("SWITCH","Eden","EXT")')
+          if 'if(item.first=="JAVA")' not in s:
+              anchor='''                if(item.first=="PS2"){\n                    isClickable=true;isFocusable=true\n                    setOnClickListener{\n                        status.text=if(Ps2BiosActivity.selectedBios(this@MainActivity)!=null)"PS2 BIOS ready • tap to change" else "PS2 BIOS setup • pilih BIOS dulu"\n                        startActivity(Intent(this@MainActivity,Ps2BiosActivity::class.java))\n                    }\n                }'''
+              s=s.replace(anchor, anchor + '''\n                if(item.first=="JAVA"){\n                    isClickable=true;isFocusable=true\n                    setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}\n                }''')
+          p.write_text(s)
+          PY
+
+      - name: Commit embedded runtime
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add settings.gradle.kts app/build.gradle.kts app/src/main/AndroidManifest.xml app/src/main/java/com/ric/emuhub/EmuHubApp.kt app/src/main/java/com/ric/emuhub/J2meLibraryActivity.kt app/src/main/java/com/ric/emuhub/MainActivity.kt .github/workflows/build-apk.yml
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Embed JL-Mod J2ME runtime and Java library"
+          git add app/libs/jlmod-runtime.aar app/libs/jlmod-dexlib.aar app/src/main/java/com/ric/emuhub/MainActivity.kt
+          git commit -m "Embed JL-Mod runtime for J2ME" || exit 0
           git push
