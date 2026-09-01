@@ -35,7 +35,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         private const val TRACE_PREFS = "ps2_runtime_trace"
         private const val TRACE_STAGE = "stage"
         private const val TRACE_ACTIVE = "active"
-        private const val PS2_UPSCALE = 1.5f
+        private const val PS2_UPSCALE = 2.0f
 
         private const val PAD_L_UP = 110
         private const val PAD_L_RIGHT = 111
@@ -255,7 +255,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private fun attachNativeSurfaceIfReady() { if (!initialized || !surfaceReady || nativeSurfaceAttached) return; val h = surface.holder; val w = if (surfaceWidth > 0) surfaceWidth else surface.width; val ht = if (surfaceHeight > 0) surfaceHeight else surface.height; if (!h.surface.isValid || w <= 0 || ht <= 0) return; status.text = "PS2 • attach surface"; trace("before-surface-created"); NativeApp.onNativeSurfaceCreated(); trace("after-surface-created"); trace("before-surface-changed"); NativeApp.onNativeSurfaceChanged(h.surface, w, ht); trace("after-surface-changed"); nativeSurfaceAttached = true }
 
     private fun maybeStartVm() { if (!initialized || !surfaceReady || !nativeSurfaceAttached || !vmStarted.compareAndSet(false, true)) return
-        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 1.5x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
+        status.text = if (biosOnly) "PS2 • boot BIOS" else "PS2 • Vulkan 2x • PERF CORES"; trace(if (biosOnly) "bios-only-before-run-vm" else "before-run-vm")
         val bootPath = if (biosOnly) "" else romPath
         vmThread = Thread({
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY) }
