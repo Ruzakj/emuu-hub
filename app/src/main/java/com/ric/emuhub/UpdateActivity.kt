@@ -150,7 +150,7 @@ class UpdateActivity : Activity() {
                         } else {
                             status.text = "Update tersedia • $tag"
                             action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true
-                            action.setOnClickListener { downloadUpdate(apkUrl!!, apkName) }
+                            action.setOnClickListener { prepareEnginePackThenDownload(apkUrl!!, apkName) }
                         }
                     }
                 }
@@ -160,6 +160,28 @@ class UpdateActivity : Activity() {
                     status.text = "Gagal cek update • ${e.message ?: "network error"}"
                     action.text = "TRY AGAIN"; action.isEnabled = true
                     action.setOnClickListener { checkUpdate() }
+                }
+            }
+        }
+    }
+
+    private fun prepareEnginePackThenDownload(url: String, name: String) {
+        if (EnginePackManager.isInstalled(this)) { downloadUpdate(url, name); return }
+        action.isEnabled = false
+        progress.visibility = ProgressBar.VISIBLE
+        status.text = "Preparing reusable Engine Pack…"
+        io.execute {
+            val result = EnginePackManager.installBlocking(applicationContext)
+            runOnUiThread {
+                if (result.isSuccess) {
+                    status.text = "Engine Pack ready • downloading app shell…"
+                    downloadUpdate(url, name)
+                } else {
+                    progress.visibility = ProgressBar.GONE
+                    status.text = "Engine Pack gagal • ${result.exceptionOrNull()?.message ?: "unknown error"}"
+                    action.text = "TRY AGAIN"
+                    action.isEnabled = true
+                    action.setOnClickListener { prepareEnginePackThenDownload(url, name) }
                 }
             }
         }

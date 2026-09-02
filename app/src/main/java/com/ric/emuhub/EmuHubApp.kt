@@ -42,6 +42,7 @@ class EmuHubApp : Application() {
         // bounce back to the library on every cold PS2-process launch.
         val processName = currentProcessName()
         val isPs2Process = processName.endsWith(":ps2")
+        if (processName == packageName) EnginePackManager.bootstrapAsync(this)
         if (!isPs2Process) {
             runCatching { File(cacheDir, "ps2roms").deleteRecursively() }
         }
