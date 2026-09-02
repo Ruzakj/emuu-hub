@@ -14,6 +14,7 @@ import android.widget.Toast
 /** Requests shared-storage access once, while keeping cold start visibly responsive. */
 class StoragePermissionActivity : Activity() {
     private var requested = false
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,7 +53,7 @@ class StoragePermissionActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(48, 48, 48, 48)
+            setPadding(dp(24), dp(24), dp(24), dp(24))
             setBackgroundColor(0xFF030406.toInt())
         }
         root.addView(TextView(this).apply {
@@ -70,8 +71,11 @@ class StoragePermissionActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
             letterSpacing = 0.14f
-        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = 10 })
-        root.addView(ProgressBar(this).apply { isIndeterminate = true }, LinearLayout.LayoutParams(42, 42).apply { topMargin = 28 })
+        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+        root.addView(
+            ProgressBar(this).apply { isIndeterminate = true },
+            LinearLayout.LayoutParams(dp(36), dp(36)).apply { topMargin = dp(18) }
+        )
         setContentView(root)
     }
 
