@@ -1,0 +1,22 @@
+name: Test Update Menu
+on:
+  push:
+    paths:
+      - '.github/workflows/test-update-menu.yml'
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish first Engine Pack capable stable update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release-apk.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f version_code=4 \
+            -f version_name=0.4.0 \
+            -f notes='Console UI + Update Center + Engine Pack transition release' \
+            -f thin_shell=false
