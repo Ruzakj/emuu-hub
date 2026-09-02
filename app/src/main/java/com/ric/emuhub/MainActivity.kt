@@ -228,6 +228,16 @@ class MainActivity : Activity() {
     }
 
     private fun pathHint(g:GameEntry)=(g.folder+"/"+g.name).lowercase()
+    private fun folderTokens(g:GameEntry)=g.folder.lowercase().split('/', '\\', ' ', '-', '_', '.', '(', ')', '[', ']').filter{it.isNotBlank()}.toSet()
+    private fun folderConsoleHint(g:GameEntry):String?{
+        val t=folderTokens(g); val h=g.folder.lowercase()
+        return when{
+            "ps2" in t || "pcsx2" in t || "armsx2" in t || h.contains("playstation 2")->"PS2"
+            "psp" in t || h.contains("playstation portable")->"PSP"
+            "ps1" in t || "psx" in t || "psone" in t || h.contains("playstation 1")->"PS1"
+            else->null
+        }
+    }
     private fun inferredConsole(g:GameEntry):String=when(g.ext){
         "cso"->"PSP"
         "bin","cue","ecm"->"PS1"
@@ -235,16 +245,8 @@ class MainActivity : Activity() {
         "nes"->"NES"
         "sfc","smc"->"SNES"
         "xci","nsp","nro"->"SWITCH"
-        "iso","chd"->{
-            val h=pathHint(g)
-            when{
-                listOf("ps2","playstation 2","pcsx2","armsx2").any{h.contains(it)}->"PS2"
-                listOf("psp","playstation portable").any{h.contains(it)}->"PSP"
-                listOf("ps1","psx","psone","playstation 1").any{h.contains(it)}->"PS1"
-                else->"DISC"
-            }
-        }
-        in ARCHIVES->"ARCHIVE"
+        "iso","chd"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
+        in ARCHIVES->folderConsoleHint(g) ?: "ARCHIVE"
         else->"OTHER"
     }
     private fun consoleRank(g:GameEntry)=when(inferredConsole(g)){"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8;else->99}
@@ -471,7 +473,9 @@ class MainActivity : Activity() {
     }
 
     private fun openArchive(uri:Uri,name:String){
-        status.text="Preparing compressed ROM • $name"
+        pendingArchiveSession?.deleteRecursively(); pendingArchiveSession=null
+        ArchiveHelper.cleanupStale(cacheDir)
+        status.text="Opening archive • $name"
         scanExecutor.execute{
             try{
                 val session=ArchiveHelper.extract(this,uri,name)
@@ -486,8 +490,22 @@ class MainActivity : Activity() {
 
     private fun launchExtractedRom(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
         when(rom.ext){
-            "iso"->showExtractedIsoChooser(session,rom)
-            "chd"->showExtractedChdChooser(session,rom)
+            "iso"->{
+                val detected=probeIsoTarget(Uri.fromFile(rom.file))
+                when(detected){
+                    "PSP"->{writePspResolution(prefs.getString(KEY_PSP_RESOLUTION,"960x544")?:"960x544");launchTempInternalFile(rom.file,"ppsspp",rom.displayName,session.root)}
+                    "PS2"->launchExtractedPs2OrSetup(session,rom)
+                    "PS1"->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
+                    else->showExtractedIsoChooser(session,rom)
+                }
+            }
+            "chd"->{
+                when(folderConsoleHint(GameEntry(Uri.fromFile(rom.file).toString(),rom.displayName,"chd",rom.file.parentFile?.path.orEmpty()))){
+                    "PS2"->launchExtractedPs2OrSetup(session,rom)
+                    "PS1"->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
+                    else->showExtractedChdChooser(session,rom)
+                }
+            }
             "cso"->showExtractedPspResolutionChooser(session,rom)
             "ecm"->decodeExtractedEcm(session,rom)
             else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)

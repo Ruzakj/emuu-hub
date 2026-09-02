@@ -28,8 +28,8 @@ object ArchiveHelper {
     fun cleanupStale(cacheDir: File) {
         val parent = File(cacheDir, "archive_sessions")
         if (!parent.exists()) return
-        val cutoff = System.currentTimeMillis() - 60L * 60L * 1000L
-        parent.listFiles()?.forEach { if (it.lastModified() < cutoff) it.deleteRecursively() }
+        // Archive sessions are disposable. Never keep extracted ROMs between app starts.
+        parent.listFiles()?.forEach { it.deleteRecursively() }
     }
 
     fun extract(context: Context, uri: Uri, archiveName: String): Session {
@@ -39,14 +39,19 @@ object ArchiveHelper {
         val suffix = archiveName.substringAfterLast('.', "archive").lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
         val source = File(root, "source.${if (suffix.isBlank()) "archive" else suffix}")
         try {
-            context.contentResolver.openInputStream(uri)?.use { input -> source.outputStream().buffered().use { output -> input.copyTo(output) } }
-                ?: error("Archive tidak dapat dibaca")
+            // Avoid the old double-I/O path when SAF resolves to a real local file.
+            val direct = directFile(context, uri)
+            val archiveSource = direct ?: source
+            if (direct == null) {
+                context.contentResolver.openInputStream(uri)?.use { input -> source.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) } }
+                    ?: error("Archive tidak dapat dibaca")
+            }
             val extracted = when {
-                archiveName.lowercase(Locale.US).endsWith(".7z") -> extract7z(source, extractRoot)
-                archiveName.lowercase(Locale.US).endsWith(".rar") -> extractRar(source, extractRoot)
-                archiveName.lowercase(Locale.US).endsWith(".zip") -> extractZip(source, extractRoot)
-                isTarName(archiveName) -> extractTar(source, extractRoot, archiveName)
-                else -> extractSingleCompressed(source, extractRoot, archiveName)
+                archiveName.lowercase(Locale.US).endsWith(".7z") -> extract7z(archiveSource, extractRoot)
+                archiveName.lowercase(Locale.US).endsWith(".rar") -> extractRar(archiveSource, extractRoot)
+                archiveName.lowercase(Locale.US).endsWith(".zip") -> extractZip(archiveSource, extractRoot)
+                isTarName(archiveName) -> extractTar(archiveSource, extractRoot, archiveName)
+                else -> extractSingleCompressed(archiveSource, extractRoot, archiveName)
             }
             source.delete()
             val playable = preferCueFiles(extracted)
@@ -56,6 +61,19 @@ object ArchiveHelper {
             root.deleteRecursively()
             throw t
         }
+    }
+
+    private fun directFile(context: Context, uri: Uri): File? {
+        if (uri.scheme == "file") return uri.path?.let(::File)?.takeIf { it.isFile && it.canRead() }
+        if (uri.scheme != "content" || uri.authority != "com.android.externalstorage.documents") return null
+        return runCatching {
+            val id = android.provider.DocumentsContract.getDocumentId(uri)
+            if (id.startsWith("raw:")) return@runCatching File(id.removePrefix("raw:")).takeIf { it.isFile && it.canRead() }
+            val parts = id.split(':', limit = 2)
+            if (parts.size != 2) return@runCatching null
+            val base = if (parts[0].equals("primary", true)) android.os.Environment.getExternalStorageDirectory() else File("/storage/${parts[0]}")
+            File(base, parts[1]).takeIf { it.isFile && it.canRead() }
+        }.getOrNull()
     }
 
     private fun isTarName(name: String): Boolean {
@@ -75,7 +93,7 @@ object ArchiveHelper {
 
     private fun copyLimited(input: InputStream, target: File, total: LongArray) {
         target.parentFile?.mkdirs()
-        val buffer = ByteArray(256 * 1024)
+        val buffer = ByteArray(1024 * 1024)
         FileOutputStream(target).buffered().use { output ->
             while (true) {
                 val n = input.read(buffer)
@@ -121,7 +139,7 @@ object ArchiveHelper {
                 if (ext !in ROM_EXTENSIONS) continue
                 val target = safeTarget(root, entry.name) ?: continue
                 target.parentFile?.mkdirs()
-                val buffer = ByteArray(256 * 1024)
+                val buffer = ByteArray(1024 * 1024)
                 FileOutputStream(target).buffered().use { output ->
                     while (true) {
                         val n = seven.read(buffer)
