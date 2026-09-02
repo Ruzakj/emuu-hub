@@ -62,6 +62,8 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
     private val scanExecutor = Executors.newFixedThreadPool(3)
     private var pendingArchiveSession: File? = null
+    private var pendingPs2ArchiveRomPath: String? = null
+    private var pendingPs2ArchiveRomName: String? = null
     private var allLibraryGames: List<GameEntry> = emptyList()
     private var activeConsoleFilter: String? = null
 
@@ -83,6 +85,7 @@ class MainActivity : Activity() {
         if (::status.isInitialized) {
             val bios = Ps2BiosActivity.selectedBios(this)
             if (bios != null && status.text.toString().startsWith("PS2 BIOS")) status.text = "PS2 BIOS ready • ${bios.name}"
+            if (bios != null) resumePendingCompressedPs2()
         }
         if (::library.isInitialized && allLibraryGames.isNotEmpty()) {
             renderLibrary(allLibraryGames, "${allLibraryGames.size} game")
@@ -487,14 +490,31 @@ class MainActivity : Activity() {
                 val session=ArchiveHelper.extract(this,uri,name)
                 runOnUiThread{
                     status.text="Archive ready • temporary files"
-                    if(session.roms.size==1)launchExtractedRom(session,session.roms.first())
+                    val candidates=archiveGameCandidates(session)
+                    if(candidates.size==1)launchExtractedRom(session,candidates.first())
                     else {
-                        val labels=session.roms.map{rom->"${archiveRomSystemLabel(rom)}  •  ${rom.displayName}"}.toTypedArray()
-                        AlertDialog.Builder(this).setTitle("Pilih game dari compressed file").setItems(labels){_,which->launchExtractedRom(session,session.roms[which])}.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
+                        val labels=candidates.map{rom->"${archiveRomSystemLabel(rom)}  •  ${rom.displayName}"}.toTypedArray()
+                        AlertDialog.Builder(this).setTitle("Pilih game dari compressed file").setItems(labels){_,which->launchExtractedRom(session,candidates[which])}.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
                     }
                 }
             }catch(e:Exception){runOnUiThread{status.text="Archive gagal dibuka";Toast.makeText(this,"Archive gagal: ${e.message}",Toast.LENGTH_LONG).show()}}
         }
+    }
+
+    private fun archiveGameCandidates(session:ArchiveHelper.Session):List<ArchiveHelper.ExtractedRom>{
+        val biosLike=Regex("(?i)(^|[^a-z])(scph|ps2[_ -]?bios|bios[_ -]?ps2|rom0|rom1|erom|dvdrom)([^a-z]|$)")
+        val filtered=session.roms.filterNot{rom->
+            rom.ext=="bin" && biosLike.containsMatchIn(rom.displayName.substringBeforeLast('.',rom.displayName))
+        }
+        val base=if(filtered.isNotEmpty())filtered else session.roms
+        return base.sortedWith(compareBy<ArchiveHelper.ExtractedRom>{rom->
+            when(rom.ext){
+                "iso","cso","chd","xci","nsp","nro"->0
+                "cue","ecm"->1
+                "bin"->2
+                else->3
+            }
+        }.thenByDescending{it.file.length()}.thenBy{it.displayName.lowercase()})
     }
 
     private fun archiveRomSystemLabel(rom:ArchiveHelper.ExtractedRom):String=when(rom.ext){
@@ -554,18 +574,41 @@ class MainActivity : Activity() {
 
     private fun launchExtractedPs2OrSetup(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
         if(Ps2BiosActivity.selectedBios(this)==null){
-            status.text="PS2 BIOS belum siap • game belum dijalankan"
+            pendingArchiveSession=session.root
+            pendingPs2ArchiveRomPath=rom.file.absolutePath
+            pendingPs2ArchiveRomName=rom.displayName
+            status.text="PS2 BIOS diperlukan • game akan lanjut otomatis setelah BIOS siap"
             AlertDialog.Builder(this)
                 .setTitle("PS2 BIOS diperlukan")
-                .setMessage("Compressed game sudah berhasil dibuka, tapi ARMSX2 membutuhkan BIOS PS2. Game tidak akan dialihkan otomatis ke layar BIOS.")
+                .setMessage("Game PS2 sudah dipilih dari compressed file. Setup BIOS sekali; saat kembali ke Emu Hub game ini akan langsung dilanjutkan, bukan kembali memilih file.")
                 .setPositiveButton("SETUP BIOS"){_,_->startActivity(Intent(this,Ps2BiosActivity::class.java))}
-                .setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}
-                .setOnCancelListener{session.root.deleteRecursively()}
+                .setNegativeButton("Batal"){_,_->clearPendingCompressedPs2(true)}
+                .setOnCancelListener{clearPendingCompressedPs2(true)}
                 .show()
             return
         }
         pendingArchiveSession=session.root
+        pendingPs2ArchiveRomPath=null
+        pendingPs2ArchiveRomName=null
         startActivityForResult(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",rom.file.absolutePath).putExtra("romName",rom.displayName),REQUEST_ARCHIVE_GAME)
+    }
+
+    private fun resumePendingCompressedPs2(){
+        val path=pendingPs2ArchiveRomPath?:return
+        val root=pendingArchiveSession?:return
+        val file=File(path)
+        if(!root.exists()||!file.isFile){clearPendingCompressedPs2(true);return}
+        val name=pendingPs2ArchiveRomName?:file.name
+        pendingPs2ArchiveRomPath=null
+        pendingPs2ArchiveRomName=null
+        status.text="PS2 BIOS ready • launching $name"
+        startActivityForResult(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("romName",name),REQUEST_ARCHIVE_GAME)
+    }
+
+    private fun clearPendingCompressedPs2(deleteSession:Boolean){
+        pendingPs2ArchiveRomPath=null
+        pendingPs2ArchiveRomName=null
+        if(deleteSession){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null}
     }
 
     private fun showExtractedPspResolutionChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
@@ -661,7 +704,7 @@ class MainActivity : Activity() {
     @Deprecated("Framework compatibility")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
         super.onActivityResult(requestCode,resultCode,data)
-        if(requestCode==REQUEST_ARCHIVE_GAME){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null;status.text="Temporary archive files deleted";return}
+        if(requestCode==REQUEST_ARCHIVE_GAME){clearPendingCompressedPs2(true);status.text="Temporary archive files deleted";return}
         if(resultCode!=RESULT_OK)return
         if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return}
         if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
