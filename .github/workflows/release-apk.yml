@@ -38,12 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
 
       - name: Validate stable signing secrets and private key
@@ -58,30 +56,18 @@ jobs:
           test -n "$EMUHUB_KEY_PASSWORD" || { echo 'Missing EMUHUB_KEY_PASSWORD'; exit 1; }
           echo "$KEYSTORE_B64" | base64 -d > "$EMUHUB_KEYSTORE_PATH"
           keytool -list -keystore "$EMUHUB_KEYSTORE_PATH" -storepass "$EMUHUB_KEYSTORE_PASSWORD" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
-
           validate_keypass() {
             local keypass="$1"
             rm -f /tmp/emuhub-keycheck.p12
-            keytool -importkeystore \
-              -srckeystore "$EMUHUB_KEYSTORE_PATH" \
-              -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" \
-              -srcalias "$EMUHUB_KEY_ALIAS" \
-              -srckeypass "$keypass" \
-              -destkeystore /tmp/emuhub-keycheck.p12 \
-              -deststoretype PKCS12 \
-              -deststorepass emuhub-temp-check-2026 \
-              -destkeypass emuhub-temp-check-2026 \
-              -noprompt >/dev/null 2>&1
+            keytool -importkeystore -srckeystore "$EMUHUB_KEYSTORE_PATH" -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" -srcalias "$EMUHUB_KEY_ALIAS" -srckeypass "$keypass" -destkeystore /tmp/emuhub-keycheck.p12 -deststoretype PKCS12 -deststorepass emuhub-temp-check-2026 -destkeypass emuhub-temp-check-2026 -noprompt >/dev/null 2>&1
           }
-
           if validate_keypass "$EMUHUB_KEY_PASSWORD"; then
             echo 'Signing key password validated.'
           elif validate_keypass "$EMUHUB_KEYSTORE_PASSWORD"; then
-            echo 'EMUHUB_KEY_PASSWORD does not unlock the key; keystore password does. Using keystore password for this release.'
+            echo 'Configured key password is wrong, but the keystore password unlocks the private key. Using it automatically.'
             echo "EMUHUB_KEY_PASSWORD=$EMUHUB_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           else
-            echo 'Signing private key cannot be unlocked. EMUHUB_KEY_PASSWORD is incorrect for the uploaded keystore.' >&2
-            echo 'Replace EMUHUB_KEY_PASSWORD with the KEY_PASSWORD value from the original signing-secrets.txt, then run this workflow again.' >&2
+            echo 'Signing private key cannot be unlocked. Update EMUHUB_KEY_PASSWORD from the original signing-secrets.txt.' >&2
             exit 1
           fi
 
@@ -136,13 +122,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so \
-                app/src/main/jniLibs/arm64-v8a/libfceumm_core.so \
-                app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so \
-                app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so \
-                app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
+          rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so app/src/main/jniLibs/arm64-v8a/libfceumm_core.so app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           rm -rf app/src/main/assets/PPSSPP
-          echo 'Thin shell enabled: reusable libretro engines and PPSSPP assets excluded from APK.'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -173,10 +154,7 @@ jobs:
             echo "Release $TAG already exists. Increase version_code." >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Emu Hub ${EMUHUB_VERSION_NAME}" \
-            --notes "${{ inputs.notes }}"
+          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Emu Hub ${EMUHUB_VERSION_NAME}" --notes "${{ inputs.notes }}"
 
       - uses: actions/upload-artifact@v4
         with:
