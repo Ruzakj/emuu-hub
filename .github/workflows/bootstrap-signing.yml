@@ -1,0 +1,47 @@
+name: Bootstrap Stable Signing Key
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate private signing material
+        shell: bash
+        run: |
+          set -euo pipefail
+          STORE_PASS=$(openssl rand -hex 24)
+          KEY_PASS=$(openssl rand -hex 24)
+          ALIAS=emuhub
+          keytool -genkeypair -v \
+            -keystore emuhub-release.jks \
+            -storepass "$STORE_PASS" \
+            -keypass "$KEY_PASS" \
+            -alias "$ALIAS" \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname "CN=Emu Hub, OU=Release, O=Ric, L=Indonesia, C=ID"
+          B64=$(base64 -w0 emuhub-release.jks)
+          {
+            echo "IMPORTANT: simpan file ini secara privat. Jangan commit ke repository."
+            echo
+            echo "Buat 4 GitHub Actions Repository Secrets dengan nama persis berikut:"
+            echo "EMUHUB_KEYSTORE_BASE64=$B64"
+            echo "EMUHUB_KEYSTORE_PASSWORD=$STORE_PASS"
+            echo "EMUHUB_KEY_ALIAS=$ALIAS"
+            echo "EMUHUB_KEY_PASSWORD=$KEY_PASS"
+            echo
+            echo "Certificate fingerprint:"
+            keytool -list -v -keystore emuhub-release.jks -storepass "$STORE_PASS" -alias "$ALIAS" | grep -E 'SHA1:|SHA256:' || true
+          } > signing-secrets.txt
+          zip -9 signing-bootstrap.zip emuhub-release.jks signing-secrets.txt
+      - name: Upload private bootstrap bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmuHub-SIGNING-PRIVATE-KEEP-SAFE
+          path: signing-bootstrap.zip
+          retention-days: 1
+          if-no-files-found: error
