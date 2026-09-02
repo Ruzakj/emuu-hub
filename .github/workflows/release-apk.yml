@@ -44,7 +44,7 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
 
-      - name: Validate stable signing secrets and private key
+      - name: Validate and normalize stable signing key
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.EMUHUB_KEYSTORE_BASE64 }}
@@ -54,22 +54,42 @@ jobs:
           test -n "$EMUHUB_KEYSTORE_PASSWORD" || { echo 'Missing EMUHUB_KEYSTORE_PASSWORD'; exit 1; }
           test -n "$EMUHUB_KEY_ALIAS" || { echo 'Missing EMUHUB_KEY_ALIAS'; exit 1; }
           test -n "$EMUHUB_KEY_PASSWORD" || { echo 'Missing EMUHUB_KEY_PASSWORD'; exit 1; }
-          echo "$KEYSTORE_B64" | base64 -d > "$EMUHUB_KEYSTORE_PATH"
-          keytool -list -keystore "$EMUHUB_KEYSTORE_PATH" -storepass "$EMUHUB_KEYSTORE_PASSWORD" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
-          validate_keypass() {
+
+          SOURCE_STORE=/tmp/emuhub-source.jks
+          NORMALIZED_STORE=/tmp/emuhub-normalized.p12
+          NORMALIZED_PASS='EmuHubNormalizedRelease2026!'
+          echo "$KEYSTORE_B64" | base64 -d > "$SOURCE_STORE"
+          keytool -list -keystore "$SOURCE_STORE" -storepass "$EMUHUB_KEYSTORE_PASSWORD" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
+
+          normalize_with() {
             local keypass="$1"
-            rm -f /tmp/emuhub-keycheck.p12
-            keytool -importkeystore -srckeystore "$EMUHUB_KEYSTORE_PATH" -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" -srcalias "$EMUHUB_KEY_ALIAS" -srckeypass "$keypass" -destkeystore /tmp/emuhub-keycheck.p12 -deststoretype PKCS12 -deststorepass emuhub-temp-check-2026 -destkeypass emuhub-temp-check-2026 -noprompt >/dev/null 2>&1
+            rm -f "$NORMALIZED_STORE"
+            keytool -importkeystore \
+              -srckeystore "$SOURCE_STORE" \
+              -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" \
+              -srcalias "$EMUHUB_KEY_ALIAS" \
+              -srckeypass "$keypass" \
+              -destkeystore "$NORMALIZED_STORE" \
+              -deststoretype PKCS12 \
+              -deststorepass "$NORMALIZED_PASS" \
+              -destkeypass "$NORMALIZED_PASS" \
+              -noprompt >/dev/null 2>&1
           }
-          if validate_keypass "$EMUHUB_KEY_PASSWORD"; then
-            echo 'Signing key password validated.'
-          elif validate_keypass "$EMUHUB_KEYSTORE_PASSWORD"; then
-            echo 'Configured key password is wrong, but the keystore password unlocks the private key. Using it automatically.'
-            echo "EMUHUB_KEY_PASSWORD=$EMUHUB_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+          if normalize_with "$EMUHUB_KEY_PASSWORD"; then
+            echo 'Signing private key imported with configured key password.'
+          elif normalize_with "$EMUHUB_KEYSTORE_PASSWORD"; then
+            echo 'Signing private key uses the keystore password; normalized automatically.'
           else
-            echo 'Signing private key cannot be unlocked. Update EMUHUB_KEY_PASSWORD from the original signing-secrets.txt.' >&2
+            echo 'Signing private key cannot be unlocked with the configured secrets.' >&2
             exit 1
           fi
+
+          keytool -list -keystore "$NORMALIZED_STORE" -storetype PKCS12 -storepass "$NORMALIZED_PASS" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
+          echo "EMUHUB_KEYSTORE_PATH=$NORMALIZED_STORE" >> "$GITHUB_ENV"
+          echo "EMUHUB_KEYSTORE_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
+          echo "EMUHUB_KEY_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
+          echo 'Normalized signing keystore ready for Gradle.'
 
       - name: Install Android toolchain
         run: |
