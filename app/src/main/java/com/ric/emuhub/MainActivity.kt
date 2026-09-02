@@ -62,8 +62,6 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
     private val scanExecutor = Executors.newFixedThreadPool(3)
     private var pendingArchiveSession: File? = null
-    private var pendingPs2ArchiveRomPath: String? = null
-    private var pendingPs2ArchiveRomName: String? = null
     private var allLibraryGames: List<GameEntry> = emptyList()
     private var activeConsoleFilter: String? = null
 
@@ -85,7 +83,6 @@ class MainActivity : Activity() {
         if (::status.isInitialized) {
             val bios = Ps2BiosActivity.selectedBios(this)
             if (bios != null && status.text.toString().startsWith("PS2 BIOS")) status.text = "PS2 BIOS ready • ${bios.name}"
-            if (bios != null) resumePendingCompressedPs2()
         }
         if (::library.isInitialized && allLibraryGames.isNotEmpty()) {
             renderLibrary(allLibraryGames, "${allLibraryGames.size} game")
@@ -192,31 +189,22 @@ class MainActivity : Activity() {
                 addView(textView(if(count==null)item[1] else "${count} game",8.5f,0xFF6F7988.toInt()).apply{maxLines=1},LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(1)})
                 when(item[0]){
                     "JAVA"->setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}
-                    else->setOnClickListener{toggleConsoleFilter(item[0])}
+                    else->setOnClickListener{activeConsoleFilter=if(activeConsoleFilter==item[0])null else item[0];renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
                 }
             }
-            row.addView(chip,LinearLayout.LayoutParams(dp(86),dp(90)).apply{if(index>0)leftMargin=dp(8)})
+            row.addView(chip,LinearLayout.LayoutParams(dp(86),dp(88)).apply{if(index>0)leftMargin=dp(8)})
         }
-        hsv.addView(row,ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(90)));return hsv
+        hsv.addView(row,ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(88)));return hsv
     }
 
-    private fun toggleConsoleFilter(console:String){
-        activeConsoleFilter=if(activeConsoleFilter==console)null else console
-        if(allLibraryGames.isEmpty())return
-        renderLibrary(allLibraryGames,if(activeConsoleFilter==null)"${allLibraryGames.size} game" else "$console library")
-    }
+    private fun showEmptyLibrary(){library.removeAllViews();countBadge.text="0 GAMES";val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;setPadding(dp(18),dp(30),dp(18),dp(30));background=rounded(0xFF0D1117.toInt(),22,0xFF202630.toInt())};box.addView(textView("NO GAMES YET",17f,0xFFF3F5F8.toInt(),true));box.addView(textView("Add one or more ROM folders. Emu Hub scans them automatically.",10.5f,0xFF707B8A.toInt()).apply{gravity=Gravity.CENTER},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(6)});library.addView(box)}
 
-    private fun showEmptyLibrary(){
-        library.removeAllViews();countBadge.text="0 GAMES";status.text="Add a ROM folder to build your hub"
-        val empty=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;setPadding(dp(20),dp(24),dp(20),dp(24));background=rounded(0xFF0D1117.toInt(),20,0xFF202630.toInt())}
-        empty.addView(textView("＋",24f,0xFF8D96A5.toInt(),true));empty.addView(textView("Build your game shelf",16f,0xFFF6F7F9.toInt(),true),LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(7)});empty.addView(textView("Add one ROM folder. Emu Hub will sort everything by console automatically.",10.5f,0xFF747E8D.toInt()).apply{gravity=Gravity.CENTER;maxLines=2},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(6)});library.addView(empty,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-
-    private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)},REQUEST_FOLDER)}
+    private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)},REQUEST_FOLDER)}
     private fun openRomPicker(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply{addCategory(Intent.CATEGORY_OPENABLE);type="*/*";addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)},REQUEST_ROM)}
 
     private fun refreshAllFolders(userRequested:Boolean){
-        val trees=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toSet().orEmpty();if(trees.isEmpty()){if(userRequested)Toast.makeText(this,"Belum ada folder ROM.",Toast.LENGTH_SHORT).show();return}
+        val trees=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.filter{it.isNotBlank()}.orEmpty()
+        if(trees.isEmpty()){if(userRequested)chooseRomFolder();return}
         status.text=if(userRequested)"Refreshing ${trees.size} folder..." else "Library ready • background scan"
         val pending=AtomicInteger(trees.size);val merged=java.util.Collections.synchronizedList(mutableListOf<GameEntry>())
         trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames(merged.distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • ${trees.size} folder")}}}}
@@ -255,7 +243,7 @@ class MainActivity : Activity() {
         "sfc","smc"->"SNES"
         "xci","nsp","nro"->"SWITCH"
         "iso","chd"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
-        in ARCHIVES->folderConsoleHint(g) ?: "ARCHIVE"
+        in ARCHIVES->"ARCHIVE"
         else->"OTHER"
     }
     private fun consoleRank(g:GameEntry)=when(inferredConsole(g)){"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8;else->99}
@@ -484,12 +472,12 @@ class MainActivity : Activity() {
     private fun openArchive(uri:Uri,name:String){
         pendingArchiveSession?.deleteRecursively(); pendingArchiveSession=null
         ArchiveHelper.cleanupStale(cacheDir)
-        status.text="Opening archive • $name"
+        status.text="Preparing compressed game • $name"
         scanExecutor.execute{
             try{
                 val session=ArchiveHelper.extract(this,uri,name)
                 runOnUiThread{
-                    status.text="Archive ready • temporary files"
+                    status.text="Uncompress complete • selecting game"
                     val candidates=archiveGameCandidates(session)
                     if(candidates.size==1)launchExtractedRom(session,candidates.first())
                     else {
@@ -506,15 +494,17 @@ class MainActivity : Activity() {
         val filtered=session.roms.filterNot{rom->
             rom.ext=="bin" && biosLike.containsMatchIn(rom.displayName.substringBeforeLast('.',rom.displayName))
         }
-        val base=if(filtered.isNotEmpty())filtered else session.roms
-        return base.sortedWith(compareBy<ArchiveHelper.ExtractedRom>{rom->
-            when(rom.ext){
-                "iso","cso","chd","xci","nsp","nro"->0
-                "cue","ecm"->1
-                "bin"->2
-                else->3
-            }
-        }.thenByDescending{it.file.length()}.thenBy{it.displayName.lowercase()})
+        val usable=if(filtered.isNotEmpty())filtered else session.roms
+        fun priority(rom:ArchiveHelper.ExtractedRom):Int=when(rom.ext){
+            "iso","cso","chd"->0
+            "xci","nsp","nro"->1
+            "cue"->2
+            "ecm"->3
+            "gba","gb","gbc","nes","sfc","smc"->4
+            "bin"->5
+            else->9
+        }
+        return usable.sortedWith(compareBy<ArchiveHelper.ExtractedRom>{priority(it)}.thenByDescending{it.file.length()})
     }
 
     private fun archiveRomSystemLabel(rom:ArchiveHelper.ExtractedRom):String=when(rom.ext){
@@ -574,41 +564,18 @@ class MainActivity : Activity() {
 
     private fun launchExtractedPs2OrSetup(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
         if(Ps2BiosActivity.selectedBios(this)==null){
-            pendingArchiveSession=session.root
-            pendingPs2ArchiveRomPath=rom.file.absolutePath
-            pendingPs2ArchiveRomName=rom.displayName
-            status.text="PS2 BIOS diperlukan • game akan lanjut otomatis setelah BIOS siap"
+            status.text="PS2 BIOS belum siap • game sudah diekstrak"
             AlertDialog.Builder(this)
                 .setTitle("PS2 BIOS diperlukan")
-                .setMessage("Game PS2 sudah dipilih dari compressed file. Setup BIOS sekali; saat kembali ke Emu Hub game ini akan langsung dilanjutkan, bukan kembali memilih file.")
-                .setPositiveButton("SETUP BIOS"){_,_->startActivity(Intent(this,Ps2BiosActivity::class.java))}
-                .setNegativeButton("Batal"){_,_->clearPendingCompressedPs2(true)}
-                .setOnCancelListener{clearPendingCompressedPs2(true)}
+                .setMessage("Game compressed sudah berhasil diekstrak. Setup BIOS PS2 dulu, lalu Emu Hub akan melanjutkan game yang sama.")
+                .setPositiveButton("SETUP BIOS"){_,_->pendingArchiveSession=session.root;startActivity(Intent(this,Ps2BiosActivity::class.java))}
+                .setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}
+                .setOnCancelListener{session.root.deleteRecursively()}
                 .show()
             return
         }
         pendingArchiveSession=session.root
-        pendingPs2ArchiveRomPath=null
-        pendingPs2ArchiveRomName=null
         startActivityForResult(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",rom.file.absolutePath).putExtra("romName",rom.displayName),REQUEST_ARCHIVE_GAME)
-    }
-
-    private fun resumePendingCompressedPs2(){
-        val path=pendingPs2ArchiveRomPath?:return
-        val root=pendingArchiveSession?:return
-        val file=File(path)
-        if(!root.exists()||!file.isFile){clearPendingCompressedPs2(true);return}
-        val name=pendingPs2ArchiveRomName?:file.name
-        pendingPs2ArchiveRomPath=null
-        pendingPs2ArchiveRomName=null
-        status.text="PS2 BIOS ready • launching $name"
-        startActivityForResult(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("romName",name),REQUEST_ARCHIVE_GAME)
-    }
-
-    private fun clearPendingCompressedPs2(deleteSession:Boolean){
-        pendingPs2ArchiveRomPath=null
-        pendingPs2ArchiveRomName=null
-        if(deleteSession){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null}
     }
 
     private fun showExtractedPspResolutionChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
@@ -645,8 +612,6 @@ class MainActivity : Activity() {
     private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"Nintendo Entertainment System • FCEUmm";"sfc","smc"->"Super Nintendo • Snes9x";"bin","cue"->"PlayStation • PCSX-ReARMed";"chd"->"PlayStation / PS2 • choose engine";"ecm"->"PlayStation • ECM auto decode";"iso"->"PS1 / PSP / PS2 • choose engine";"cso"->"PSP • PPSSPP";"xci","nsp","nro"->"Nintendo Switch • Eden Optimized";in ARCHIVES->"Compressed ROM • temporary auto extract";else->"ROM"}
     private fun cacheKey(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}.take(24)
 
-    /** Resolve Storage Access Framework URIs to their real storage path.
-     * Normal game images are launched in place; only archives/transform formats use cache. */
     private fun directGameFile(uri:Uri):File?{
         if(uri.scheme=="file")return uri.path?.let(::File)?.takeIf{it.isFile&&it.canRead()}
         if(uri.scheme!="content")return null
@@ -704,7 +669,7 @@ class MainActivity : Activity() {
     @Deprecated("Framework compatibility")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
         super.onActivityResult(requestCode,resultCode,data)
-        if(requestCode==REQUEST_ARCHIVE_GAME){clearPendingCompressedPs2(true);status.text="Temporary archive files deleted";return}
+        if(requestCode==REQUEST_ARCHIVE_GAME){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null;status.text="Temporary archive files deleted";return}
         if(resultCode!=RESULT_OK)return
         if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return}
         if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
