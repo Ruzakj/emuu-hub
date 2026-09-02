@@ -19,6 +19,10 @@ android {
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     signingConfigs {
         create("stableRelease") {
             val storePath = System.getenv("EMUHUB_KEYSTORE_PATH")
