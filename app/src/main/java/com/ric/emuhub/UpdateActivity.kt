@@ -8,15 +8,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -35,7 +38,10 @@ class UpdateActivity : Activity() {
     private val io = Executors.newSingleThreadExecutor()
     private lateinit var status: TextView
     private lateinit var action: Button
+    private lateinit var testAction: Button
     private lateinit var progress: ProgressBar
+    private lateinit var engineState: TextView
+    private lateinit var channelState: TextView
     private var pendingApk: File? = null
     private var downloadId: Long = -1L
 
@@ -43,9 +49,9 @@ class UpdateActivity : Activity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != downloadId) return
             val apk = pendingApk ?: return
-            progress.visibility = ProgressBar.GONE
+            progress.visibility = View.GONE
             if (apk.exists() && apk.length() > 0L) installApk(apk) else {
-                status.text = "Download gagal"
+                status.text = "Download failed"
                 action.isEnabled = true
             }
         }
@@ -56,6 +62,7 @@ class UpdateActivity : Activity() {
         render()
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        refreshLocalState()
         checkUpdate()
     }
 
@@ -67,97 +74,160 @@ class UpdateActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        refreshLocalState()
         val apk = pendingApk
         if (apk != null && apk.exists() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && packageManager.canRequestPackageInstalls()) installApk(apk)
     }
 
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun rounded(color: Int, radius: Int, stroke: Int? = null) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(radius).toFloat()
+        if (stroke != null) setStroke(dp(1), stroke)
+    }
+    private fun tv(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        includeFontPadding = false
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+    }
+
     private fun render() {
-        val pad = (22 * resources.displayMetrics.density).toInt()
+        window.statusBarColor = 0xFF030406.toInt()
+        window.navigationBarColor = 0xFF030406.toInt()
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF05070A.toInt())
+            setBackgroundColor(0xFF030406.toInt())
         }
-        root.addView(TextView(this).apply {
-            text = "SYSTEM UPDATE"
-            textSize = 12f
-            setTextColor(0xFF8E98A8.toInt())
-            setTypeface(typeface, Typeface.BOLD)
-            letterSpacing = 0.12f
-        })
-        root.addView(TextView(this).apply {
-            text = "Keep Emu Hub current"
-            textSize = 27f
-            setTextColor(0xFFFFFFFF.toInt())
-            setTypeface(typeface, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad / 2 })
-        root.addView(TextView(this).apply {
-            text = "Installed: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-            textSize = 12f
-            setTextColor(0xFF7D8795.toInt())
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad / 3 })
-        status = TextView(this).apply {
-            text = "Checking GitHub Release…"
-            textSize = 14f
-            setTextColor(0xFFF0F3F7.toInt())
+        val scroll = ScrollView(this).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(28))
         }
-        root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad })
+
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titles.addView(tv("SYSTEM UPDATE", 10f, 0xFF7E8A9A.toInt(), true).apply { letterSpacing = 0.17f })
+        titles.addView(tv("Update Center", 27f, 0xFFFFFFFF.toInt(), true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
+        top.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(tv("←", 23f, 0xFFFFFFFF.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(0xFF111720.toInt(), 16, 0xFF283443.toInt())
+            setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(dp(42), dp(42)))
+        content.addView(top)
+
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(17), dp(18), dp(17))
+            background = rounded(0xFF101722.toInt(), 24, 0xFF29384C.toInt())
+        }
+        hero.addView(tv("APP SHELL", 9f, 0xFF8DA2BD.toInt(), true).apply { letterSpacing = 0.16f })
+        hero.addView(tv("Emu Hub ${BuildConfig.VERSION_NAME}", 22f, 0xFFFFFFFF.toInt(), true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
+        hero.addView(tv("Build ${BuildConfig.VERSION_CODE} • signed in-app update channel", 10.5f, 0xFF8998AA.toInt()), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        content.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(17) })
+
+        val stateRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val engineCard = stateCard("ENGINE PACK")
+        engineState = engineCard.second
+        stateRow.addView(engineCard.first, LinearLayout.LayoutParams(0, dp(86), 1f).apply { rightMargin = dp(5) })
+        val channelCard = stateCard("UPDATE CHANNEL")
+        channelState = channelCard.second
+        stateRow.addView(channelCard.first, LinearLayout.LayoutParams(0, dp(86), 1f).apply { leftMargin = dp(5) })
+        content.addView(stateRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(86)).apply { topMargin = dp(11) })
+
+        val checkCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(15), dp(16), dp(15))
+            background = rounded(0xFF0B1017.toInt(), 21, 0xFF202B39.toInt())
+        }
+        checkCard.addView(tv("LATEST RELEASE", 9f, 0xFF738094.toInt(), true).apply { letterSpacing = 0.14f })
+        status = tv("Checking GitHub Release…", 14f, 0xFFF2F5F8.toInt(), true)
+        checkCard.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) })
         progress = ProgressBar(this).apply { isIndeterminate = true }
-        root.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad / 2; gravity = Gravity.CENTER_HORIZONTAL })
+        checkCard.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10); gravity = Gravity.CENTER_HORIZONTAL })
+        content.addView(checkCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(11) })
+
         action = Button(this).apply {
-            text = "CHECK AGAIN"
+            text = "CHECK FOR UPDATE"
             isEnabled = false
+            setTextColor(0xFF05070A.toInt())
+            background = rounded(0xFFF4F7FA.toInt(), 15)
+            setTypeface(typeface, Typeface.BOLD)
             setOnClickListener { checkUpdate() }
         }
-        root.addView(action, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (52 * resources.displayMetrics.density).toInt()).apply { topMargin = pad })
+        content.addView(action, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { topMargin = dp(12) })
+
+        testAction = Button(this).apply {
+            text = "RUN UPDATE SELF-TEST"
+            setTextColor(0xFFF3F6FA.toInt())
+            background = rounded(0xFF111820.toInt(), 15, 0xFF2A394B.toInt())
+            setTypeface(typeface, Typeface.BOLD)
+            setOnClickListener { runSelfTest() }
+        }
+        content.addView(testAction, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { topMargin = dp(9) })
+
+        content.addView(tv("SELF-TEST only checks release API, APK asset discovery, Engine Pack status, and install permission. It never downloads or installs anything.", 9.5f, 0xFF687587.toInt()), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+
+        scroll.addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+    }
+
+    private fun stateCard(title: String): Pair<LinearLayout, TextView> {
+        val value = tv("…", 11f, 0xFFF4F7FA.toInt(), true)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(0xFF0B1017.toInt(), 19, 0xFF202B39.toInt())
+            addView(tv(title, 8.5f, 0xFF6D7A8D.toInt(), true).apply { letterSpacing = 0.12f })
+            addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
+        }
+        return card to value
+    }
+
+    private fun refreshLocalState() {
+        engineState.text = if (EnginePackManager.isInstalled(this)) "READY" else "BOOTSTRAP"
+        channelState.text = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) "INSTALL READY" else "PERMISSION NEEDED"
     }
 
     private fun checkUpdate() {
         action.isEnabled = false
-        progress.visibility = ProgressBar.VISIBLE
+        progress.visibility = View.VISIBLE
         status.text = "Checking latest release…"
         io.execute {
             try {
-                val c = URL(LATEST_RELEASE).openConnection() as HttpURLConnection
-                c.connectTimeout = 8000
-                c.readTimeout = 12000
-                c.setRequestProperty("Accept", "application/vnd.github+json")
-                c.setRequestProperty("User-Agent", "EmuHub-Updater/${BuildConfig.VERSION_NAME}")
-                val body = c.inputStream.bufferedReader().use { it.readText() }
-                val release = JSONObject(body)
+                val release = fetchLatestRelease()
                 val tag = release.optString("tag_name")
                 val remoteCode = tag.substringAfterLast('v').replace(Regex("[^0-9]"), "").toLongOrNull()
-                val assets = release.optJSONArray("assets")
-                var apkUrl: String? = null
-                var apkName = "EmuHub-update.apk"
-                if (assets != null) for (i in 0 until assets.length()) {
-                    val a = assets.getJSONObject(i)
-                    val n = a.optString("name")
-                    if (n.endsWith(".apk", true)) { apkUrl = a.optString("browser_download_url"); apkName = n; break }
-                }
+                val apk = findApkAsset(release)
                 runOnUiThread {
-                    progress.visibility = ProgressBar.GONE
-                    if (apkUrl.isNullOrBlank()) {
-                        status.text = "Release ditemukan, tapi APK tidak tersedia."
+                    progress.visibility = View.GONE
+                    if (apk == null) {
+                        status.text = "Release found • APK asset missing"
                         action.text = "CHECK AGAIN"; action.isEnabled = true
+                        action.setOnClickListener { checkUpdate() }
                     } else {
                         val localCode = BuildConfig.VERSION_CODE.toLong()
                         val newer = remoteCode?.let { it > localCode } ?: true
                         if (!newer) {
-                            status.text = "Sudah versi terbaru • $tag"
+                            status.text = "You're current • $tag"
                             action.text = "CHECK AGAIN"; action.isEnabled = true
+                            action.setOnClickListener { checkUpdate() }
                         } else {
-                            status.text = "Update tersedia • $tag"
+                            status.text = "Update ready • $tag"
                             action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true
-                            action.setOnClickListener { prepareEnginePackThenDownload(apkUrl!!, apkName) }
+                            action.setOnClickListener { prepareEnginePackThenDownload(apk.first, apk.second) }
                         }
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    progress.visibility = ProgressBar.GONE
-                    status.text = "Gagal cek update • ${e.message ?: "network error"}"
+                    progress.visibility = View.GONE
+                    status.text = "Update check failed • ${e.message ?: "network error"}"
                     action.text = "TRY AGAIN"; action.isEnabled = true
                     action.setOnClickListener { checkUpdate() }
                 }
@@ -165,20 +235,72 @@ class UpdateActivity : Activity() {
         }
     }
 
+    private fun runSelfTest() {
+        testAction.isEnabled = false
+        progress.visibility = View.VISIBLE
+        status.text = "Running updater self-test…"
+        io.execute {
+            val results = mutableListOf<String>()
+            results += "Engine Pack: " + if (EnginePackManager.isInstalled(applicationContext)) "PASS" else "READY TO BOOTSTRAP"
+            results += "Install permission: " + if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) "PASS" else "USER ACTION NEEDED"
+            try {
+                val release = fetchLatestRelease()
+                results += "GitHub release API: PASS"
+                results += "Latest tag: ${release.optString("tag_name", "unknown")}"
+                val apk = findApkAsset(release)
+                results += "APK asset: " + if (apk != null) "PASS • ${apk.second}" else "FAIL • missing APK"
+            } catch (e: Exception) {
+                results += "GitHub release API: FAIL • ${e.message ?: "network error"}"
+            }
+            runOnUiThread {
+                progress.visibility = View.GONE
+                testAction.isEnabled = true
+                status.text = results.joinToString("\n")
+                refreshLocalState()
+            }
+        }
+    }
+
+    private fun fetchLatestRelease(): JSONObject {
+        val c = URL(LATEST_RELEASE).openConnection() as HttpURLConnection
+        c.connectTimeout = 8000
+        c.readTimeout = 12000
+        c.setRequestProperty("Accept", "application/vnd.github+json")
+        c.setRequestProperty("User-Agent", "EmuHub-Updater/${BuildConfig.VERSION_NAME}")
+        return try {
+            val body = c.inputStream.bufferedReader().use { it.readText() }
+            JSONObject(body)
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    private fun findApkAsset(release: JSONObject): Pair<String, String>? {
+        val assets = release.optJSONArray("assets") ?: return null
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            val n = a.optString("name")
+            val url = a.optString("browser_download_url")
+            if (n.endsWith(".apk", true) && url.isNotBlank()) return url to n
+        }
+        return null
+    }
+
     private fun prepareEnginePackThenDownload(url: String, name: String) {
         if (EnginePackManager.isInstalled(this)) { downloadUpdate(url, name); return }
         action.isEnabled = false
-        progress.visibility = ProgressBar.VISIBLE
+        progress.visibility = View.VISIBLE
         status.text = "Preparing reusable Engine Pack…"
         io.execute {
             val result = EnginePackManager.installBlocking(applicationContext)
             runOnUiThread {
+                refreshLocalState()
                 if (result.isSuccess) {
                     status.text = "Engine Pack ready • downloading app shell…"
                     downloadUpdate(url, name)
                 } else {
-                    progress.visibility = ProgressBar.GONE
-                    status.text = "Engine Pack gagal • ${result.exceptionOrNull()?.message ?: "unknown error"}"
+                    progress.visibility = View.GONE
+                    status.text = "Engine Pack failed • ${result.exceptionOrNull()?.message ?: "unknown error"}"
                     action.text = "TRY AGAIN"
                     action.isEnabled = true
                     action.setOnClickListener { prepareEnginePackThenDownload(url, name) }
@@ -202,10 +324,11 @@ class UpdateActivity : Activity() {
         runCatching {
             downloadId = dm.enqueue(request)
             status.text = "Downloading update…"
-            progress.visibility = ProgressBar.VISIBLE
+            progress.visibility = View.VISIBLE
             action.isEnabled = false
         }.onFailure {
-            Toast.makeText(this, "Download gagal: ${it.message}", Toast.LENGTH_LONG).show()
+            progress.visibility = View.GONE
+            Toast.makeText(this, "Download failed: ${it.message}", Toast.LENGTH_LONG).show()
             action.isEnabled = true
         }
     }
@@ -213,12 +336,12 @@ class UpdateActivity : Activity() {
     private fun installApk(apk: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
             AlertDialog.Builder(this)
-                .setTitle("Izinkan update")
-                .setMessage("Android perlu izin Install unknown apps untuk Emu Hub. Aktifkan sekali; update berikutnya tidak perlu uninstall.")
+                .setTitle("Allow app updates")
+                .setMessage("Android needs Install unknown apps permission for Emu Hub. Enable it once so future signed updates can install without uninstalling the app.")
                 .setPositiveButton("OPEN SETTINGS") { _, _ ->
                     startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                 }
-                .setNegativeButton("Batal", null)
+                .setNegativeButton("CANCEL", null)
                 .show()
             return
         }
