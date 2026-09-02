@@ -152,6 +152,7 @@ class MainActivity : Activity() {
         quickRow.addView(miniTile("↻","Refresh","Scan library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(76),1f).apply{rightMargin=dp(5)})
         quickRow.addView(miniTile("PS2","Tuning","BIOS & settings") { startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(76),1f).apply{leftMargin=dp(5)})
         content.addView(quickRow,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(76)).apply{topMargin=dp(12)})
+        content.addView(miniTile("↑","System Update","Check • download • install latest build") { startActivity(Intent(this@MainActivity,UpdateActivity::class.java)) },LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(68)).apply{topMargin=dp(10)})
 
         val consoleHead=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
         consoleHead.addView(sectionTitle("BROWSE BY CONSOLE"),LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));consoleHead.addView(textView("8 SYSTEMS",9f,0xFF596170.toInt(),true))
