@@ -26,6 +26,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          CURRENT_MAIN=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$SHA" != "$CURRENT_MAIN" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "A newer main commit exists; skipping stale build $SHA."
+            exit 0
+          fi
+
           FILES=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.files[].filename' || true)
           echo "$FILES"
           if echo "$FILES" | grep -Eq '^(app/|build.gradle|settings.gradle|gradle/|gradle.properties)'; then
