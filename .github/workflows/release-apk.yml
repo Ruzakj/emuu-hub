@@ -46,7 +46,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Validate stable signing secrets
+      - name: Validate stable signing secrets and private key
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.EMUHUB_KEYSTORE_BASE64 }}
@@ -58,6 +58,32 @@ jobs:
           test -n "$EMUHUB_KEY_PASSWORD" || { echo 'Missing EMUHUB_KEY_PASSWORD'; exit 1; }
           echo "$KEYSTORE_B64" | base64 -d > "$EMUHUB_KEYSTORE_PATH"
           keytool -list -keystore "$EMUHUB_KEYSTORE_PATH" -storepass "$EMUHUB_KEYSTORE_PASSWORD" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
+
+          validate_keypass() {
+            local keypass="$1"
+            rm -f /tmp/emuhub-keycheck.p12
+            keytool -importkeystore \
+              -srckeystore "$EMUHUB_KEYSTORE_PATH" \
+              -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" \
+              -srcalias "$EMUHUB_KEY_ALIAS" \
+              -srckeypass "$keypass" \
+              -destkeystore /tmp/emuhub-keycheck.p12 \
+              -deststoretype PKCS12 \
+              -deststorepass emuhub-temp-check-2026 \
+              -destkeypass emuhub-temp-check-2026 \
+              -noprompt >/dev/null 2>&1
+          }
+
+          if validate_keypass "$EMUHUB_KEY_PASSWORD"; then
+            echo 'Signing key password validated.'
+          elif validate_keypass "$EMUHUB_KEYSTORE_PASSWORD"; then
+            echo 'EMUHUB_KEY_PASSWORD does not unlock the key; keystore password does. Using keystore password for this release.'
+            echo "EMUHUB_KEY_PASSWORD=$EMUHUB_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo 'Signing private key cannot be unlocked. EMUHUB_KEY_PASSWORD is incorrect for the uploaded keystore.' >&2
+            echo 'Replace EMUHUB_KEY_PASSWORD with the KEY_PASSWORD value from the original signing-secrets.txt, then run this workflow again.' >&2
+            exit 1
+          fi
 
       - name: Install Android toolchain
         run: |
