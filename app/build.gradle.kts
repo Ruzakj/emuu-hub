@@ -12,8 +12,8 @@ android {
         applicationId = "com.ric.emuhub"
         minSdk = 26
         targetSdk = 35
-        versionCode = System.getenv("EMUHUB_VERSION_CODE")?.toIntOrNull() ?: 3
-        versionName = System.getenv("EMUHUB_VERSION_NAME") ?: "0.3.0"
+        versionCode = System.getenv("EMUHUB_VERSION_CODE")?.toIntOrNull() ?: 4
+        versionName = System.getenv("EMUHUB_VERSION_NAME") ?: "0.4.0"
 
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
@@ -84,7 +84,7 @@ dependencies {
     implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")
     implementation("androidx.fragment:fragment-ktx:1.6.2")
     implementation("androidx.lifecycle:lifecycle-common:2.6.2")
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.2")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     implementation("androidx.multidex:multidex:2.0.1")
     implementation("androidx.preference:preference-ktx:1.2.1")
