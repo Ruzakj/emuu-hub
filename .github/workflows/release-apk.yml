@@ -16,6 +16,11 @@ on:
         required: false
         default: 'Emu Hub update'
         type: string
+      thin_shell:
+        description: 'Exclude reusable libretro cores + PPSSPP assets (only after an Engine Pack capable release is installed)'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -99,6 +104,19 @@ jobs:
           rm -rf app/src/main/assets/ARMSX2; mkdir -p app/src/main/assets/ARMSX2
           cp -a /tmp/armsx2-runtime/assets/ARMSX2/. app/src/main/assets/ARMSX2/
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
+
+      - name: Prepare thin app shell
+        if: ${{ inputs.thin_shell }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so \
+                app/src/main/jniLibs/arm64-v8a/libfceumm_core.so \
+                app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so \
+                app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so \
+                app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
+          rm -rf app/src/main/assets/PPSSPP
+          echo 'Thin shell enabled: reusable libretro engines and PPSSPP assets excluded from APK.'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
