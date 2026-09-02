@@ -13,7 +13,6 @@ jobs:
         run: |
           from pathlib import Path
 
-          # GameActivity: prefer verified external Engine Pack core, retain bundled fallback.
           p=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt'); s=p.read_text()
           old='''        val systemRoot = StoragePaths.systemDir(this)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        if (!NativeBridge.init(applicationInfo.nativeLibraryDir + "/$coreFile", systemRoot.absolutePath, saveDir.absolutePath)) { showLoadError("$coreLabel core gagal inisialisasi."); return }'''
           new='''        val systemRoot = StoragePaths.systemDir(this)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")\n        if (!File(corePath).isFile) {\n            EnginePackManager.bootstrapAsync(this)\n            showLoadError("$coreLabel engine belum siap. Engine Pack sedang disiapkan; coba lagi setelah selesai.")\n            return\n        }\n        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { showLoadError("$coreLabel core gagal inisialisasi."); return }'''
@@ -22,17 +21,14 @@ jobs:
           old2='''    private fun installPpssppAssets(root:File){val target=File(root,"PPSSPP");val marker=File(target,".emuhub_assets_v1");if(marker.exists())return;target.mkdirs();copyAssetTree("PPSSPP",target);runCatching{marker.writeText("1")}}\n    private fun copyAssetTree(path:String,target:File){val entries=assets.list(path)?:return;if(entries.isEmpty()){target.parentFile?.mkdirs();assets.open(path).use{i->target.outputStream().use{i.copyTo(it)}};return};target.mkdirs();entries.forEach{copyAssetTree("$path/$it",File(target,it))}}'''
           new2='''    private fun installPpssppAssets(root:File){\n        val target=File(root,"PPSSPP")\n        val marker=File(target,".emuhub_assets_v1")\n        if(marker.exists())return\n        target.mkdirs()\n        val packed=EnginePackManager.ppssppAssetsDir(this)\n        if(packed!=null) copyFileTree(packed,target) else copyAssetTree("PPSSPP",target)\n        if(target.listFiles()?.isNotEmpty()==true) runCatching{marker.writeText("1")}\n    }\n    private fun copyFileTree(source:File,target:File){\n        if(source.isDirectory){target.mkdirs();source.listFiles()?.forEach{copyFileTree(it,File(target,it.name))}}\n        else{target.parentFile?.mkdirs();source.inputStream().buffered(1024*1024).use{i->target.outputStream().buffered(1024*1024).use{o->i.copyTo(o,1024*1024)}}}\n    }\n    private fun copyAssetTree(path:String,target:File){val entries=assets.list(path)?:return;if(entries.isEmpty()){target.parentFile?.mkdirs();assets.open(path).use{i->target.outputStream().use{i.copyTo(it)}};return};target.mkdirs();entries.forEach{copyAssetTree("$path/$it",File(target,it))}}'''
           if old2 not in s: raise SystemExit('PPSSPP asset block not found')
-          s=s.replace(old2,new2)
-          p.write_text(s)
+          p.write_text(s.replace(old2,new2))
 
-          # EmuHubApp: background bootstrap only in main process; child emulator processes stay untouched.
           p=Path('app/src/main/java/com/ric/emuhub/EmuHubApp.kt'); s=p.read_text()
           old='''        val processName = currentProcessName()\n        val isPs2Process = processName.endsWith(":ps2")\n        if (!isPs2Process) {'''
           new='''        val processName = currentProcessName()\n        val isPs2Process = processName.endsWith(":ps2")\n        if (processName == packageName) EnginePackManager.bootstrapAsync(this)\n        if (!isPs2Process) {'''
           if old not in s: raise SystemExit('EmuHubApp process block not found')
           p.write_text(s.replace(old,new))
 
-          # UpdateActivity: make sure the reusable Engine Pack exists before installing future thin shell APKs.
           p=Path('app/src/main/java/com/ric/emuhub/UpdateActivity.kt'); s=p.read_text()
           old='''                            action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true\n                            action.setOnClickListener { downloadUpdate(apkUrl!!, apkName) }'''
           new='''                            action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true\n                            action.setOnClickListener { prepareEnginePackThenDownload(apkUrl!!, apkName) }'''
@@ -41,23 +37,12 @@ jobs:
           marker='''    private fun downloadUpdate(url: String, name: String) {'''
           helper='''    private fun prepareEnginePackThenDownload(url: String, name: String) {\n        if (EnginePackManager.isInstalled(this)) { downloadUpdate(url, name); return }\n        action.isEnabled = false\n        progress.visibility = ProgressBar.VISIBLE\n        status.text = "Preparing reusable Engine Pack…"\n        io.execute {\n            val result = EnginePackManager.installBlocking(applicationContext)\n            runOnUiThread {\n                if (result.isSuccess) {\n                    status.text = "Engine Pack ready • downloading app shell…"\n                    downloadUpdate(url, name)\n                } else {\n                    progress.visibility = ProgressBar.GONE\n                    status.text = "Engine Pack gagal • ${result.exceptionOrNull()?.message ?: "unknown error"}"\n                    action.text = "TRY AGAIN"\n                    action.isEnabled = true\n                    action.setOnClickListener { prepareEnginePackThenDownload(url, name) }\n                }\n            }\n        }\n    }\n\n'''
           if marker not in s: raise SystemExit('downloadUpdate marker not found')
-          s=s.replace(marker,helper+marker)
-          p.write_text(s)
-
-          # Stable release: optional thin shell, after one full manager-enabled release is installed.
-          p=Path('.github/workflows/release-apk.yml'); s=p.read_text()
-          needle='''      notes:\n        description: 'Release notes'\n        required: false\n        default: 'Emu Hub update'\n        type: string'''
-          replacement='''      notes:\n        description: 'Release notes'\n        required: false\n        default: 'Emu Hub update'\n        type: string\n      thin_shell:\n        description: 'Exclude reusable libretro cores + PPSSPP assets (use only after Engine Pack capable release is installed)'\n        required: true\n        default: false\n        type: boolean'''
-          if needle not in s: raise SystemExit('release inputs block not found')
-          s=s.replace(needle,replacement)
-          marker='''      - name: Build stable signed release APK\n        run: gradle assembleRelease --build-cache --parallel --stacktrace'''
-          repl='''      - name: Prepare thin app shell\n        if: ${{ inputs.thin_shell }}\n        shell: bash\n        run: |\n          set -euo pipefail\n          rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so \\\n                app/src/main/jniLibs/arm64-v8a/libfceumm_core.so \\\n                app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so \\\n                app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so \\\n                app/src/main/jniLibs/arm64-v8a/libppsspp_core.so\n          rm -rf app/src/main/assets/PPSSPP\n          echo 'Thin shell enabled: reusable libretro engines and PPSSPP assets excluded from APK.'\n\n      - name: Build stable signed release APK\n        run: gradle assembleRelease --build-cache --parallel --stacktrace'''
-          if marker not in s: raise SystemExit('release build marker not found')
-          p.write_text(s.replace(marker,repl))
-      - run: |
-          rm .github/workflows/integrate-engine-pack.yml
+          p.write_text(s.replace(marker,helper+marker))
+      - shell: bash
+        run: |
+          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/src/main/java/com/ric/emuhub/GameActivity.kt app/src/main/java/com/ric/emuhub/EmuHubApp.kt app/src/main/java/com/ric/emuhub/UpdateActivity.kt .github/workflows/release-apk.yml .github/workflows/integrate-engine-pack.yml
-          git commit -m 'Integrate reusable Engine Pack with app shell updater'
+          git add app/src/main/java/com/ric/emuhub/GameActivity.kt app/src/main/java/com/ric/emuhub/EmuHubApp.kt app/src/main/java/com/ric/emuhub/UpdateActivity.kt
+          git commit -m 'Integrate reusable Engine Pack into runtime'
           git push
