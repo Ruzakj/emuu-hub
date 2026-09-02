@@ -25,6 +25,7 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -34,6 +35,9 @@ class UpdateActivity : Activity() {
         private const val LATEST_RELEASE = "https://api.github.com/repos/Ruzakj/emuu-hub/releases/latest"
         private const val APK_MIME = "application/vnd.android.package-archive"
     }
+
+    private class NoStableReleaseException : IOException("No stable release published yet")
+    private class ReleaseApiException(val code: Int, message: String) : IOException(message)
 
     private val io = Executors.newSingleThreadExecutor()
     private lateinit var status: TextView
@@ -224,10 +228,18 @@ class UpdateActivity : Activity() {
                         }
                     }
                 }
+            } catch (_: NoStableReleaseException) {
+                runOnUiThread {
+                    progress.visibility = View.GONE
+                    status.text = "No stable update published yet"
+                    action.text = "CHECK AGAIN"
+                    action.isEnabled = true
+                    action.setOnClickListener { checkUpdate() }
+                }
             } catch (e: Exception) {
                 runOnUiThread {
                     progress.visibility = View.GONE
-                    status.text = "Update check failed • ${e.message ?: "network error"}"
+                    status.text = "Update service unavailable • ${friendlyError(e)}"
                     action.text = "TRY AGAIN"; action.isEnabled = true
                     action.setOnClickListener { checkUpdate() }
                 }
@@ -249,8 +261,12 @@ class UpdateActivity : Activity() {
                 results += "Latest tag: ${release.optString("tag_name", "unknown")}"
                 val apk = findApkAsset(release)
                 results += "APK asset: " + if (apk != null) "PASS • ${apk.second}" else "FAIL • missing APK"
+            } catch (_: NoStableReleaseException) {
+                results += "GitHub release API: PASS"
+                results += "Stable release: NOT PUBLISHED YET"
+                results += "APK asset: WAITING FOR FIRST STABLE RELEASE"
             } catch (e: Exception) {
-                results += "GitHub release API: FAIL • ${e.message ?: "network error"}"
+                results += "GitHub release API: FAIL • ${friendlyError(e)}"
             }
             runOnUiThread {
                 progress.visibility = View.GONE
@@ -265,14 +281,28 @@ class UpdateActivity : Activity() {
         val c = URL(LATEST_RELEASE).openConnection() as HttpURLConnection
         c.connectTimeout = 8000
         c.readTimeout = 12000
+        c.instanceFollowRedirects = true
         c.setRequestProperty("Accept", "application/vnd.github+json")
+        c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
         c.setRequestProperty("User-Agent", "EmuHub-Updater/${BuildConfig.VERSION_NAME}")
         return try {
-            val body = c.inputStream.bufferedReader().use { it.readText() }
+            val code = c.responseCode
+            if (code == HttpURLConnection.HTTP_NOT_FOUND) throw NoStableReleaseException()
+            val stream = if (code in 200..299) c.inputStream else c.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) throw ReleaseApiException(code, "GitHub HTTP $code")
+            if (body.isBlank()) throw IOException("Empty release response")
             JSONObject(body)
         } finally {
             c.disconnect()
         }
+    }
+
+    private fun friendlyError(e: Exception): String = when (e) {
+        is ReleaseApiException -> "GitHub HTTP ${e.code}"
+        is java.net.SocketTimeoutException -> "connection timed out"
+        is java.net.UnknownHostException -> "no internet connection"
+        else -> e.message?.substringBefore("https://")?.trim()?.trimEnd('•')?.takeIf { it.isNotBlank() } ?: "network error"
     }
 
     private fun findApkAsset(release: JSONObject): Pair<String, String>? {
