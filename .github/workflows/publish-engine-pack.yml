@@ -1,0 +1,109 @@
+name: Publish Engine Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_version:
+        description: 'Engine Pack version'
+        required: true
+        default: '1'
+        type: string
+  push:
+    paths:
+      - '.github/workflows/publish-engine-pack.yml'
+
+permissions:
+  contents: write
+
+env:
+  ENGINE_VERSION: ${{ inputs.engine_version || '1' }}
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Engine Pack payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACK="/tmp/engine-pack"
+          rm -rf "$PACK" /tmp/cores /tmp/ppsspp-src
+          mkdir -p "$PACK/lib" "$PACK/assets/PPSSPP" /tmp/cores /tmp/ppsspp-src
+
+          fetch_core() {
+            local name="$1" out="$2"
+            mkdir -p "/tmp/cores/$name"
+            curl --retry 3 --retry-delay 2 -fL \
+              "https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/${name}_libretro_android.so.zip" \
+              -o "/tmp/cores/$name.zip"
+            unzip -q "/tmp/cores/$name.zip" -d "/tmp/cores/$name"
+            cp "$(find "/tmp/cores/$name" -type f -name '*.so' | head -1)" "$PACK/lib/$out"
+          }
+
+          fetch_core mgba libmgba_core.so
+          fetch_core fceumm libfceumm_core.so
+          fetch_core snes9x libsnes9x_core.so
+          fetch_core pcsx_rearmed libpcsx_rearmed_core.so
+          fetch_core ppsspp libppsspp_core.so
+
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://github.com/hrydgard/ppsspp/archive/refs/tags/v1.20.4.tar.gz" \
+            -o /tmp/ppsspp-src.tar.gz
+          tar -xzf /tmp/ppsspp-src.tar.gz -C /tmp/ppsspp-src --strip-components=1
+          cp -a /tmp/ppsspp-src/assets/. "$PACK/assets/PPSSPP/"
+
+          python3 - <<'PY'
+          import hashlib, json, os
+          root='/tmp/engine-pack'
+          files=[]
+          for base, dirs, names in os.walk(root):
+              for name in sorted(names):
+                  path=os.path.join(base,name)
+                  rel=os.path.relpath(path,root).replace(os.sep,'/')
+                  h=hashlib.sha256()
+                  with open(path,'rb') as f:
+                      for chunk in iter(lambda:f.read(1024*1024),b''):
+                          h.update(chunk)
+                  files.append({'path':rel,'sha256':h.hexdigest(),'size':os.path.getsize(path)})
+          with open(os.path.join(root,'manifest.json'),'w') as f:
+              json.dump({'engineVersion':int(os.environ['ENGINE_VERSION']),'abi':'arm64-v8a','files':files},f,separators=(',',':'))
+          PY
+
+      - name: Package and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="EmuHub-EnginePack-v${ENGINE_VERSION}-arm64.zip"
+          cd /tmp/engine-pack
+          zip -9 -r "/tmp/$NAME" . >/dev/null
+          cd /tmp
+          sha256sum "$NAME" > "$NAME.sha256"
+          ls -lh "$NAME" "$NAME.sha256"
+
+      - name: Publish prerelease Engine Pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="engine-v${ENGINE_VERSION}"
+          NAME="EmuHub-EnginePack-v${ENGINE_VERSION}-arm64.zip"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "/tmp/$NAME" "/tmp/$NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "/tmp/$NAME" "/tmp/$NAME.sha256" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Emu Hub Engine Pack v${ENGINE_VERSION}" \
+              --notes "Runtime Engine Pack for Emu Hub. Prerelease so it is ignored by the app-shell updater." \
+              --prerelease
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmuHub-EnginePack-v${{ env.ENGINE_VERSION }}
+          path: |
+            /tmp/EmuHub-EnginePack-v${{ env.ENGINE_VERSION }}-arm64.zip
+            /tmp/EmuHub-EnginePack-v${{ env.ENGINE_VERSION }}-arm64.zip.sha256
+          if-no-files-found: error
