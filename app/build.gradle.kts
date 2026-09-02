@@ -12,11 +12,25 @@ android {
         applicationId = "com.ric.emuhub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = System.getenv("EMUHUB_VERSION_CODE")?.toIntOrNull() ?: 3
+        versionName = System.getenv("EMUHUB_VERSION_NAME") ?: "0.3.0"
 
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
+    }
+
+    signingConfigs {
+        create("stableRelease") {
+            val storePath = System.getenv("EMUHUB_KEYSTORE_PATH")
+            if (!storePath.isNullOrBlank()) storeFile = file(storePath)
+            storePassword = System.getenv("EMUHUB_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("EMUHUB_KEY_ALIAS")
+            keyPassword = System.getenv("EMUHUB_KEY_PASSWORD")
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
     }
 
     externalNativeBuild {
@@ -29,6 +43,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("stableRelease")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
