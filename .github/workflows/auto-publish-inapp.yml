@@ -1,0 +1,92 @@
+name: Auto Publish In-App Update
+
+on:
+  workflow_run:
+    workflows: ["Build Android APK"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: emuhub-auto-stable-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether this build changes the app
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILES=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq '.files[].filename' || true)
+          echo "$FILES"
+          if echo "$FILES" | grep -Eq '^(app/|build.gradle|settings.gradle|gradle/|gradle.properties)'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "No app/runtime files changed; skipping stable release."
+          fi
+
+      - name: Compute next stable version
+        if: steps.changes.outputs.publish == 'true'
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LATEST=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
+          TAG=$(echo "$LATEST" | jq -r '.tag_name')
+          CURRENT_CODE=${TAG#v}
+          CURRENT_NAME=$(echo "$LATEST" | jq -r '.name' | sed -E 's/^Emu Hub[[:space:]]+//')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_NAME"
+          MAJOR=${MAJOR:-0}; MINOR=${MINOR:-4}; PATCH=${PATCH:-0}
+          NEXT_CODE=$((CURRENT_CODE + 1))
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_NAME="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          echo "code=$NEXT_CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NEXT_NAME" >> "$GITHUB_OUTPUT"
+          echo "Next stable: v$NEXT_CODE / $NEXT_NAME"
+
+      - name: Dispatch stable thin-shell release
+        if: steps.changes.outputs.publish == 'true'
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.version.outputs.code }}
+          NAME: ${{ steps.version.outputs.name }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release-apk.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run release-apk.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f version_code="$CODE" \
+            -f version_name="$NAME" \
+            -f notes="Automatic in-app update from green build ${SOURCE_SHA:0:12}" \
+            -f thin_shell=true
+
+          RUN_ID=""
+          for i in $(seq 1 30); do
+            sleep 2
+            CANDIDATE=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release-apk.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+            if [ "$CANDIDATE" != "0" ] && [ "$CANDIDATE" != "$BEFORE" ]; then RUN_ID="$CANDIDATE"; break; fi
+          done
+          test -n "$RUN_ID" || { echo 'Stable release workflow did not start.' >&2; exit 1; }
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Stable release run: $RUN_ID"
+
+      - name: Wait for in-app release publication
+        if: steps.changes.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
