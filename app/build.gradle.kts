@@ -23,6 +23,12 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     signingConfigs {
         create("stableRelease") {
             val storePath = System.getenv("EMUHUB_KEYSTORE_PATH")
