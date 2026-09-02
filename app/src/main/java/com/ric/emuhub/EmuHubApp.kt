@@ -17,13 +17,16 @@ class EmuHubApp : Application() {
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
 
-        // JL-Mod normally performs this work from EmulatorApplication.attachBaseContext().
-        // Emu Hub embeds the runtime as an AAR, so initialize the runtime before any
-        // Config/MicroActivity static initializer can run in both the main and :j2me process.
         runCatching { ContextHolder.init(this) }
-        runCatching {
-            if (!ACRA.isACRASenderServiceProcess()) {
-                ACRA.init(this, CoreConfigurationBuilder().withParallel(false))
+
+        // ACRA initialization is only needed by the isolated JL-Mod process. Initializing it
+        // during every cold app launch delayed the first visible frame on some devices.
+        val process = if (Build.VERSION.SDK_INT >= 28) getProcessName() else base.packageName
+        if (process.endsWith(":j2me")) {
+            runCatching {
+                if (!ACRA.isACRASenderServiceProcess()) {
+                    ACRA.init(this, CoreConfigurationBuilder().withParallel(false))
+                }
             }
         }
     }
@@ -31,21 +34,25 @@ class EmuHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
         runCatching { ContextHolder.init(this) }
-        runCatching { StoragePaths.ensureLayout(this) }
+
+        val processName = currentProcessName()
+        val isMainProcess = processName == packageName
+        val isPs2Process = processName.endsWith(":ps2")
+        val isJ2meProcess = processName.endsWith(":j2me")
+
+        // Keep Application.onCreate lightweight so Android can draw the launcher immediately.
+        if (isMainProcess) {
+            EnginePackManager.bootstrapAsync(this)
+            Thread({
+                runCatching { StoragePaths.ensureLayout(applicationContext) }
+                runCatching { File(cacheDir, "ps2roms").deleteRecursively() }
+            }, "emuhub-coldstart-maintenance").start()
+        } else if (!isPs2Process) {
+            Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
+        }
 
         installJ2meCrashHandler()
-        recoverJ2meCrashTrace()
-
-        // Ps2GameActivity runs in the dedicated :ps2 process. Never clean ps2roms from that
-        // process: MainActivity has just copied the selected ISO/CHD there immediately before
-        // starting :ps2, so deleting it here causes the intermittent "PS2 ROM tidak ditemukan"
-        // bounce back to the library on every cold PS2-process launch.
-        val processName = currentProcessName()
-        val isPs2Process = processName.endsWith(":ps2")
-        if (processName == packageName) EnginePackManager.bootstrapAsync(this)
-        if (!isPs2Process) {
-            runCatching { File(cacheDir, "ps2roms").deleteRecursively() }
-        }
+        if (isMainProcess || isJ2meProcess) recoverJ2meCrashTrace()
 
         val trace = getSharedPreferences("ps2_runtime_trace", MODE_PRIVATE)
         if (trace.getBoolean("active", false)) {
@@ -54,7 +61,7 @@ class EmuHubApp : Application() {
                 .putString("last_crash_stage", stage)
                 .putLong("last_crash_time", System.currentTimeMillis())
                 .putBoolean("active", false)
-                .commit()
+                .apply()
             if (!isPs2Process) {
                 Toast.makeText(this, "PS2 native crash stage: $stage", Toast.LENGTH_LONG).show()
             }
@@ -109,9 +116,6 @@ class EmuHubApp : Application() {
             }
 
             if (isJ2meProcess) {
-                // A broken MIDlet must never trigger Android's "Emu Hub keeps stopping"
-                // flow or take down the main Emu Hub process. Log it, then terminate only
-                // the isolated J2ME runtime process. The existing main task stays alive.
                 Process.killProcess(Process.myPid())
                 return@setDefaultUncaughtExceptionHandler
             }
@@ -160,8 +164,6 @@ class EmuHubApp : Application() {
             .putBoolean("active", false)
             .commit()
 
-        // Do not show recovery toasts inside the isolated runtime process; they are noisy
-        // and can race with the runtime being relaunched after a bad MIDlet exits.
         if (!currentProcessName().endsWith(":j2me")) {
             Toast.makeText(
                 this,
