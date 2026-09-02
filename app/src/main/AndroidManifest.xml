@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
@@ -15,6 +17,14 @@
         </intent>
     </queries>
     <application android:name=".EmuHubApp" android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" />
+        </provider>
+        <activity android:name=".UpdateActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".J2meLibraryActivity" android:screenOrientation="unspecified" />
         <activity android:name=".Ps2SettingsActivity" android:screenOrientation="portrait" />
         <activity android:name=".Ps2BiosActivity" android:screenOrientation="portrait" />
