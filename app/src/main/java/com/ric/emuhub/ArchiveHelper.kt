@@ -2,6 +2,7 @@ package com.ric.emuhub
 
 import android.content.Context
 import android.net.Uri
+import com.github.junrar.Archive
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -16,8 +17,8 @@ import java.util.UUID
 import java.util.zip.ZipFile
 
 object ArchiveHelper {
-    private val ROM_EXTENSIONS = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")
-    val ARCHIVE_EXTENSIONS = setOf("zip","7z","tar","tgz","gz","bz2","xz","tbz2","txz")
+    private val ROM_EXTENSIONS = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","xci","nsp","nro")
+    val ARCHIVE_EXTENSIONS = setOf("zip","7z","rar","tar","tgz","gz","bz2","xz","tbz2","txz")
     private const val MAX_ENTRIES = 4096
     private const val MAX_TOTAL_BYTES = 10L * 1024L * 1024L * 1024L
 
@@ -42,6 +43,7 @@ object ArchiveHelper {
                 ?: error("Archive tidak dapat dibaca")
             val extracted = when {
                 archiveName.lowercase(Locale.US).endsWith(".7z") -> extract7z(source, extractRoot)
+                archiveName.lowercase(Locale.US).endsWith(".rar") -> extractRar(source, extractRoot)
                 archiveName.lowercase(Locale.US).endsWith(".zip") -> extractZip(source, extractRoot)
                 isTarName(archiveName) -> extractTar(source, extractRoot, archiveName)
                 else -> extractSingleCompressed(source, extractRoot, archiveName)
@@ -129,6 +131,31 @@ object ArchiveHelper {
                         output.write(buffer, 0, n)
                     }
                 }
+                result += ExtractedRom(target, target.name, ext)
+            }
+        }
+        return result
+    }
+
+    private fun extractRar(source: File, root: File): List<ExtractedRom> {
+        val result = mutableListOf<ExtractedRom>()
+        val total = longArrayOf(0L)
+        Archive(source).use { rar ->
+            var seen = 0
+            while (true) {
+                val entry = rar.nextFileHeader() ?: break
+                if (++seen > MAX_ENTRIES) error("Terlalu banyak file di dalam archive")
+                if (entry.isDirectory) continue
+                val entryName = entry.fileNameW.takeIf { it.isNotBlank() } ?: entry.fileNameString
+                val ext = romExt(entryName)
+                if (ext !in ROM_EXTENSIONS) continue
+                val target = safeTarget(root, entryName) ?: continue
+                target.parentFile?.mkdirs()
+                FileOutputStream(target).buffered().use { output ->
+                    rar.extractFile(entry, output)
+                }
+                total[0] += target.length()
+                if (total[0] > MAX_TOTAL_BYTES) error("Archive terlalu besar")
                 result += ExtractedRom(target, target.name, ext)
             }
         }

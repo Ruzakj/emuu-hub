@@ -333,11 +333,19 @@ class MainActivity : Activity() {
     private fun localCoverFile(g:GameEntry):File?{
         val rom=directGameFile(Uri.parse(g.uri))?:return null
         val base=rom.nameWithoutExtension
-        val candidates=listOf(
-            File(rom.parentFile,"$base.jpg"),File(rom.parentFile,"$base.jpeg"),File(rom.parentFile,"$base.png"),
-            File(rom.parentFile,"cover.jpg"),File(rom.parentFile,"cover.png"),File(rom.parentFile,"folder.jpg"),File(rom.parentFile,"folder.png")
-        )
-        return candidates.firstOrNull{it.isFile&&it.canRead()}
+        val parent=rom.parentFile?:return null
+        val artDirs=listOf(parent,File(parent,"covers"),File(parent,"cover"),File(parent,"boxart"),File(parent,"boxarts"),File(parent,"art"),File(parent,"images"),File(parent,"thumbnails"))
+        val names=listOf(base,"$base-front","$base-cover","cover","front","boxart","folder","thumbnail","thumb")
+        val imageExts=listOf("jpg","jpeg","png","webp")
+        for(dir in artDirs)for(n in names)for(e in imageExts){
+            val f=File(dir,"$n.$e")
+            if(f.isFile&&f.canRead())return f
+        }
+        return null
+    }
+
+    private fun consoleGlyph(g:GameEntry)=when(inferredConsole(g)){
+        "PSP"->"P";"PS1"->"1";"PS2"->"2";"GBA"->"G";"NES"->"N";"SNES"->"S";"SWITCH"->"▰";"DISC"->"◎";"ARCHIVE"->"◆";else->"•"
     }
 
     private fun coverView(g:GameEntry,height:Int):View{
@@ -348,8 +356,9 @@ class MainActivity : Activity() {
             if(bmp!=null)frame.addView(ImageView(this).apply{setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         }
         if(frame.childCount==0){
+            frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
             frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
-            frame.addView(textView(g.name.substringBeforeLast('.',g.name).take(34),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+            frame.addView(textView(g.name.substringBeforeLast('.',g.name).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         }
         val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}
         frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})
