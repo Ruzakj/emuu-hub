@@ -32,8 +32,7 @@ object StorageMaintenance {
         if (updates.isDirectory) {
             val now = System.currentTimeMillis()
             updates.listFiles()?.forEach { file ->
-                // After a successful package replacement every installer is obsolete. During the same
-                // version keep only recent files so a failed/retried install can still resume safely.
+                // Package replacement makes old installers obsolete; same-version retries keep only recent files.
                 if (previousVersion != currentVersion || now - file.lastModified() > MAX_FAILED_UPDATE_AGE_MS) {
                     file.deleteRecursively()
                 }
