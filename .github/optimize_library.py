@@ -68,3 +68,4 @@ cover='''    private fun coverView(g:GameEntry,height:Int):View{
 s=s[:a]+cover+s[b:]
 s=s.replace('libraryRenderLimit+=60', 'libraryRenderLimit+=36')
 p.write_text(s)
+# trigger v2
