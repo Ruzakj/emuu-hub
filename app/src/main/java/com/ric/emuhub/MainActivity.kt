@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -64,6 +65,9 @@ class MainActivity : Activity() {
     private var pendingArchiveSession: File? = null
     private var allLibraryGames: List<GameEntry> = emptyList()
     private var activeConsoleFilter: String? = null
+    private val consoleHintCache = HashMap<String, String>()
+    private val gameTitleCache = HashMap<String, String>()
+    private var libraryRenderLimit = 60
 
     private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -83,9 +87,6 @@ class MainActivity : Activity() {
         if (::status.isInitialized) {
             val bios = Ps2BiosActivity.selectedBios(this)
             if (bios != null && status.text.toString().startsWith("PS2 BIOS")) status.text = "PS2 BIOS ready • ${bios.name}"
-        }
-        if (::library.isInitialized && allLibraryGames.isNotEmpty()) {
-            renderLibrary(allLibraryGames, "${allLibraryGames.size} game")
         }
     }
 
@@ -189,7 +190,7 @@ class MainActivity : Activity() {
                 addView(textView(if(count==null)item[1] else "${count} game",8.5f,0xFF6F7988.toInt()).apply{maxLines=1},LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(1)})
                 when(item[0]){
                     "JAVA"->setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}
-                    else->setOnClickListener{activeConsoleFilter=if(activeConsoleFilter==item[0])null else item[0];renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                    else->setOnClickListener{activeConsoleFilter=if(activeConsoleFilter==item[0])null else item[0];libraryRenderLimit=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
                 }
             }
             row.addView(chip,LinearLayout.LayoutParams(dp(86),dp(88)).apply{if(index>0)leftMargin=dp(8)})
@@ -235,16 +236,21 @@ class MainActivity : Activity() {
             else->null
         }
     }
-    private fun inferredConsole(g:GameEntry):String=when(g.ext){
-        "cso"->"PSP"
-        "bin","cue","ecm"->"PS1"
-        "gb","gbc","gba"->"GBA"
-        "nes"->"NES"
-        "sfc","smc"->"SNES"
-        "xci","nsp","nro"->"SWITCH"
-        "iso","chd"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
-        in ARCHIVES->"ARCHIVE"
-        else->"OTHER"
+    private fun inferredConsole(g:GameEntry):String {
+        consoleHintCache[g.uri]?.let { return it }
+        val value = when(g.ext){
+            "cso"->"PSP"
+            "bin","cue","ecm"->"PS1"
+            "gb","gbc","gba"->"GBA"
+            "nes"->"NES"
+            "sfc","smc"->"SNES"
+            "xci","nsp","nro"->"SWITCH"
+            "iso","chd"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
+            in ARCHIVES->"ARCHIVE"
+            else->"OTHER"
+        }
+        consoleHintCache[g.uri] = value
+        return value
     }
     private fun consoleRank(g:GameEntry)=when(inferredConsole(g)){"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8;else->99}
     private fun consoleGroup(g:GameEntry)=when(inferredConsole(g)){
@@ -260,6 +266,33 @@ class MainActivity : Activity() {
         else->"OTHER"
     }
     private fun sortGames(games:List<GameEntry>)=games.sortedWith(compareBy<GameEntry>{consoleRank(it)}.thenBy{it.name.lowercase()})
+
+    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
+        val raw = g.name.substringBeforeLast('.', g.name).trim()
+        val generic = setOf("game", "disc", "disk", "image", "rom", "dvd", "cd", "track")
+        val folderName = g.folder.trim('/').substringAfterLast('/').trim()
+        val seed = if (raw.lowercase() in generic && folderName.isNotBlank()) folderName else raw
+        seed
+            .replace(Regex("(?i)\[[^]]*(?:SLUS|SLES|SCUS|SCES|ULUS|ULES|NPJH|NPUH|NPUG|USA|EUR|JPN|ASIA|PAL|NTSC)[^]]*]"), " ")
+            .replace(Regex("(?i)\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|En(?:,[A-Za-z]{2})+|Rev ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+)[^)]*\)"), " ")
+            .replace(Regex("(?i)\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ ]?\d{3,6}\b"), " ")
+            .replace('_', ' ')
+            .replace(Regex("\s+-\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\s{2,}"), " ")
+            .trim(' ', '-', '_', '.')
+            .ifBlank { raw }
+    }
+
+    private fun decodeCoverSampled(file: File, reqWidth: Int, reqHeight: Int): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > reqWidth * 2 || bounds.outHeight / sample > reqHeight * 2) sample *= 2
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+            inSampleSize = sample.coerceAtLeast(1)
+            inPreferredConfig = Bitmap.Config.RGB_565
+        })
+    }.getOrNull()
 
     private fun renderLibrary(games:List<GameEntry>,label:String){
         allLibraryGames=games
@@ -295,8 +328,9 @@ class MainActivity : Activity() {
         }
 
         val sorted=sortGames(visible)
+        val rendered=sorted.take(libraryRenderLimit)
         val grid=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        sorted.chunked(2).forEach{pair->
+        rendered.chunked(2).forEach{pair->
             val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.TOP}
             pair.forEachIndexed{idx,g->
                 row.addView(buildGameTile(g),LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f).apply{
@@ -307,6 +341,13 @@ class MainActivity : Activity() {
             grid.addView(row,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{bottomMargin=dp(10)})
         }
         library.addView(grid)
+        if(rendered.size<sorted.size){
+            val more=Button(this).apply{
+                text="SHOW MORE  •  ${sorted.size-rendered.size} REMAINING"
+                setOnClickListener{libraryRenderLimit+=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+            }
+            library.addView(more,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(48)).apply{topMargin=dp(4);bottomMargin=dp(8)})
+        }
     }
 
     private fun buildFilterStrip():View{
@@ -321,7 +362,7 @@ class MainActivity : Activity() {
                 setPadding(dp(15),0,dp(15),0);isClickable=true;isFocusable=true
                 setOnClickListener{
                     if(label=="JAVA")startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))
-                    else{activeConsoleFilter=if(label=="ALL")null else label;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                    else{activeConsoleFilter=if(label=="ALL")null else label;libraryRenderLimit=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
                 }
             }
             row.addView(chip,LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(36)).apply{if(i>0)leftMargin=dp(7)})
@@ -351,13 +392,13 @@ class MainActivity : Activity() {
         val frame=FrameLayout(this).apply{background=rounded(systemColorFor(g),18);clipToOutline=true}
         val cover=localCoverFile(g)
         if(cover!=null){
-            val bmp=runCatching{BitmapFactory.decodeFile(cover.absolutePath)}.getOrNull()
+            val bmp=decodeCoverSampled(cover,dp(180),height)
             if(bmp!=null)frame.addView(ImageView(this).apply{setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         }
         if(frame.childCount==0){
             frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
             frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
-            frame.addView(textView(g.name.substringBeforeLast('.',g.name).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+            frame.addView(textView(gameTitle(g).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         }
         val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}
         frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})
@@ -368,7 +409,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL;setPadding(dp(8),dp(8),dp(8),dp(10));background=rounded(0xFF0D1117.toInt(),20,0xFF202833.toInt());isClickable=true;isFocusable=true
             addView(coverView(g,dp(142)),LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(142)))
-            addView(textView(g.name.substringBeforeLast('.',g.name),12f,0xFFF5F7FA.toInt(),true).apply{maxLines=2},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(9)})
+            addView(textView(gameTitle(g),12f,0xFFF5F7FA.toInt(),true).apply{maxLines=2},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(9)})
             val meta=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
             meta.addView(textView(systemCodeFor(g),8.5f,0xFF8E9AAA.toInt(),true),LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
             meta.addView(textView("▶",10f,0xFFFFFFFF.toInt(),true))
@@ -381,7 +422,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL;setPadding(dp(7),dp(7),dp(7),dp(9));background=rounded(0xFF0C1118.toInt(),18,0xFF202833.toInt());isClickable=true;isFocusable=true
             addView(coverView(g,dp(118)),LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(118)))
-            addView(textView(g.name.substringBeforeLast('.',g.name),10.5f,0xFFF4F6F9.toInt(),true).apply{maxLines=2},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(7)})
+            addView(textView(gameTitle(g),10.5f,0xFFF4F6F9.toInt(),true).apply{maxLines=2},LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(7)})
             setOnClickListener{openLibraryGame(g)}
         }
     }
