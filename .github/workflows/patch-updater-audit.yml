@@ -14,27 +14,11 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
           p=Path('app/src/main/java/com/ric/emuhub/UpdateActivity.kt'); s=p.read_text()
           s=s.replace('import java.io.IOException\n', 'import java.io.IOException\nimport java.io.FileInputStream\nimport java.security.MessageDigest\n')
           s=s.replace('    private class ReleaseApiException(val code: Int, message: String) : IOException(message)\n', '    private class ReleaseApiException(val code: Int, message: String) : IOException(message)\n    private data class ApkAsset(val url: String, val name: String, val size: Long, val digest: String?)\n')
           s=s.replace('    private var downloadId: Long = -1L\n', '    private var downloadId: Long = -1L\n    @Volatile private var downloadCancelled = false\n')
-          old='''            val apk = pendingApk ?: return
-            progress.visibility = View.GONE
-            if (apk.exists() && apk.length() > 0L) installApk(apk) else {
-                status.text = "Download failed"
-                action.isEnabled = true
-            }'''
-          new='''            val apk = pendingApk ?: return
-            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-            val cursor = dm.query(DownloadManager.Query().setFilterById(downloadId))
-            val ok = cursor.use { c -> c.moveToFirst() && c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL }
-            if (!ok || !apk.exists() || apk.length() <= 0L) {
-                apk.delete(); pendingApk = null; progress.visibility = View.GONE
-                status.text = "Download failed • temporary file cleaned"
-                action.text = "TRY AGAIN"; action.isEnabled = true; action.setOnClickListener { checkUpdate() }
-            }'''
-          if old not in s: raise SystemExit('receiver pattern missing')
-          s=s.replace(old,new)
           s=s.replace('''                            status.text = "Update ready • $tag"
                             action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true
                             action.setOnClickListener { prepareEnginePackThenDownload(apk.first, apk.second) }''','''                            status.text = "Update ready • $tag • ${formatBytes(apk.size)}"
@@ -42,7 +26,8 @@ jobs:
                             action.setOnClickListener { prepareEnginePackThenDownload(apk) }''')
           s=s.replace('results += "APK asset: " + if (apk != null) "PASS • ${apk.second}" else "FAIL • missing APK"','results += "APK asset: " + if (apk != null) "PASS • ${apk.name} • ${formatBytes(apk.size)}" else "FAIL • missing APK"')
           start=s.index('    private fun findApkAsset('); end=s.index('    private fun installApk(', start)
-          block=Path('.github/updater-block.tmp').read_text(); s=s[:start]+block+s[end:]; p.write_text(s)
+          block=Path('.github/updater-block.tmp').read_text(); s=s[:start]+block+s[end:]
+          p.write_text(s)
       - name: Commit patch
         run: |
           git config user.name github-actions[bot]
