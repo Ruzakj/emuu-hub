@@ -26,6 +26,8 @@ import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.io.FileInputStream
+import java.security.MessageDigest
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -38,6 +40,7 @@ class UpdateActivity : Activity() {
 
     private class NoStableReleaseException : IOException("No stable release published yet")
     private class ReleaseApiException(val code: Int, message: String) : IOException(message)
+    private data class ApkAsset(val url: String, val name: String, val size: Long, val digest: String?)
 
     private val io = Executors.newSingleThreadExecutor()
     private lateinit var status: TextView
@@ -48,6 +51,7 @@ class UpdateActivity : Activity() {
     private lateinit var channelState: TextView
     private var pendingApk: File? = null
     private var downloadId: Long = -1L
+    @Volatile private var downloadCancelled = false
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -260,7 +264,7 @@ class UpdateActivity : Activity() {
                 results += "GitHub release API: PASS"
                 results += "Latest tag: ${release.optString("tag_name", "unknown")}"
                 val apk = findApkAsset(release)
-                results += "APK asset: " + if (apk != null) "PASS • ${apk.second}" else "FAIL • missing APK"
+                results += "APK asset: " + if (apk != null) "PASS • ${apk.name} • ${formatBytes(apk.size)}" else "FAIL • missing APK"
             } catch (_: NoStableReleaseException) {
                 results += "GitHub release API: PASS"
                 results += "Stable release: NOT PUBLISHED YET"
@@ -305,62 +309,81 @@ class UpdateActivity : Activity() {
         else -> e.message?.substringBefore("https://")?.trim()?.trimEnd('•')?.takeIf { it.isNotBlank() } ?: "network error"
     }
 
-    private fun findApkAsset(release: JSONObject): Pair<String, String>? {
+    private fun findApkAsset(release: JSONObject): ApkAsset? {
         val assets = release.optJSONArray("assets") ?: return null
         for (i in 0 until assets.length()) {
             val a = assets.getJSONObject(i)
             val n = a.optString("name")
             val url = a.optString("browser_download_url")
-            if (n.endsWith(".apk", true) && url.isNotBlank()) return url to n
+            if (n.endsWith(".apk", true) && url.isNotBlank()) return ApkAsset(url, n, a.optLong("size", -1L), a.optString("digest").takeIf { it.startsWith("sha256:") })
         }
         return null
     }
 
-    private fun prepareEnginePackThenDownload(url: String, name: String) {
-        if (EnginePackManager.isInstalled(this)) { downloadUpdate(url, name); return }
-        action.isEnabled = false
-        progress.visibility = View.VISIBLE
-        status.text = "Preparing reusable Engine Pack…"
+    private fun formatBytes(bytes: Long): String = when {
+        bytes < 0L -> "size unknown"
+        bytes >= 1024L * 1024L -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1048576.0)
+        bytes >= 1024L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0)
+        else -> "$bytes B"
+    }
+
+    private fun prepareEnginePackThenDownload(asset: ApkAsset) {
+        if (EnginePackManager.isInstalled(this)) { downloadUpdate(asset); return }
+        action.isEnabled = false; progress.visibility = View.VISIBLE; status.text = "Preparing reusable Engine Pack…"
         io.execute {
             val result = EnginePackManager.installBlocking(applicationContext)
             runOnUiThread {
                 refreshLocalState()
-                if (result.isSuccess) {
-                    status.text = "Engine Pack ready • downloading app shell…"
-                    downloadUpdate(url, name)
-                } else {
-                    progress.visibility = View.GONE
-                    status.text = "Engine Pack failed • ${result.exceptionOrNull()?.message ?: "unknown error"}"
-                    action.text = "TRY AGAIN"
-                    action.isEnabled = true
-                    action.setOnClickListener { prepareEnginePackThenDownload(url, name) }
-                }
+                if (result.isSuccess) { status.text = "Engine Pack ready • downloading ${formatBytes(asset.size)}…"; downloadUpdate(asset) }
+                else { progress.visibility = View.GONE; status.text = "Engine Pack failed • ${result.exceptionOrNull()?.message ?: "unknown error"}"; action.text = "TRY AGAIN"; action.isEnabled = true; action.setOnClickListener { prepareEnginePackThenDownload(asset) } }
             }
         }
     }
 
-    private fun downloadUpdate(url: String, name: String) {
+    private fun downloadUpdate(asset: ApkAsset) {
         val dir = File(getExternalFilesDir(null), "updates").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }
-        val apk = File(dir, name.ifBlank { "EmuHub-update.apk" })
-        pendingApk = apk
-        val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle("Emu Hub update")
-            .setDescription("Downloading latest signed APK")
-            .setMimeType(APK_MIME)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationUri(Uri.fromFile(apk))
+        dir.listFiles()?.forEach { it.deleteRecursively() }
+        val apk = File(dir, asset.name.ifBlank { "EmuHub-update.apk" })
+        pendingApk = apk; downloadCancelled = false
+        val request = DownloadManager.Request(Uri.parse(asset.url)).setTitle("Emu Hub update").setDescription("Downloading ${formatBytes(asset.size)} signed update").setMimeType(APK_MIME).setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setDestinationUri(Uri.fromFile(apk))
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
         runCatching {
             downloadId = dm.enqueue(request)
-            status.text = "Downloading update…"
-            progress.visibility = View.VISIBLE
-            action.isEnabled = false
-        }.onFailure {
-            progress.visibility = View.GONE
-            Toast.makeText(this, "Download failed: ${it.message}", Toast.LENGTH_LONG).show()
-            action.isEnabled = true
+            progress.isIndeterminate = false; progress.max = 100; progress.progress = 0; progress.visibility = View.VISIBLE
+            action.text = "CANCEL DOWNLOAD"; action.isEnabled = true
+            action.setOnClickListener { downloadCancelled = true; dm.remove(downloadId); apk.delete(); pendingApk = null; progress.visibility = View.GONE; status.text = "Download cancelled • temporary file cleaned"; action.text = "CHECK AGAIN"; action.setOnClickListener { checkUpdate() } }
+            Thread({ monitorDownload(dm, asset, apk) }, "emuhub-update-progress").start()
+        }.onFailure { apk.delete(); pendingApk = null; progress.visibility = View.GONE; status.text = "Download failed • temporary file cleaned"; action.text = "TRY AGAIN"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } }
+    }
+
+    private fun monitorDownload(dm: DownloadManager, asset: ApkAsset, apk: File) {
+        while (!downloadCancelled && downloadId >= 0L) {
+            var done = false
+            runCatching {
+                dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
+                    if (!c.moveToFirst()) { done = true; return@use }
+                    val state = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    val got = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                    val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)).takeIf { it > 0 } ?: asset.size
+                    if (state == DownloadManager.STATUS_SUCCESSFUL) done = true else if (state == DownloadManager.STATUS_FAILED) throw IOException("DownloadManager failed")
+                    if (total > 0) runOnUiThread { val pct = ((got * 100L) / total).coerceIn(0L, 100L).toInt(); progress.progress = pct; status.text = "Downloading • $pct% • ${formatBytes(got)} / ${formatBytes(total)}" }
+                }
+            }.onFailure { dm.remove(downloadId); apk.delete(); pendingApk = null; done = true; runOnUiThread { progress.visibility = View.GONE; status.text = "Download failed • temporary file cleaned"; action.text = "RETRY"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } } }
+            if (done) break
+            try { Thread.sleep(500) } catch (_: InterruptedException) { break }
         }
+        if (downloadCancelled || !apk.isFile) return
+        runCatching { verifyDownloadedApk(apk, asset) }.onSuccess { runOnUiThread { progress.progress = 100; status.text = "Verified • ${formatBytes(apk.length())} • ready to install"; action.text = "INSTALL UPDATE"; action.isEnabled = true; action.setOnClickListener { installApk(apk) }; installApk(apk) } }.onFailure { apk.delete(); pendingApk = null; runOnUiThread { progress.visibility = View.GONE; status.text = "Update file corrupt • cleaned safely"; action.text = "RETRY DOWNLOAD"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } } }
+    }
+
+    private fun verifyDownloadedApk(file: File, asset: ApkAsset) {
+        require(file.isFile && file.length() > 0L) { "APK missing" }
+        if (asset.size > 0L) require(file.length() == asset.size) { "APK size mismatch" }
+        val expected = asset.digest?.removePrefix("sha256:") ?: return
+        val md = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).buffered().use { input -> val buf = ByteArray(1024 * 1024); while (true) { val n = input.read(buf); if (n <= 0) break; md.update(buf, 0, n) } }
+        val actual = md.digest().joinToString("") { "%02x".format(it) }
+        require(actual.equals(expected, true)) { "APK checksum mismatch" }
     }
 
     private fun installApk(apk: File) {
