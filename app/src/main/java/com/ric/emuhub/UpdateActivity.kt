@@ -226,9 +226,9 @@ class UpdateActivity : Activity() {
                             action.text = "CHECK AGAIN"; action.isEnabled = true
                             action.setOnClickListener { checkUpdate() }
                         } else {
-                            status.text = "Update ready • $tag"
+                            status.text = "Update ready • $tag • ${formatBytes(apk.size)}"
                             action.text = "DOWNLOAD & UPDATE"; action.isEnabled = true
-                            action.setOnClickListener { prepareEnginePackThenDownload(apk.first, apk.second) }
+                            action.setOnClickListener { prepareEnginePackThenDownload(apk) }
                         }
                     }
                 }
