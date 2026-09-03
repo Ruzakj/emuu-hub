@@ -25,6 +25,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.util.LruCache
 import androidx.documentfile.provider.DocumentFile
 import com.ric.emuhub.core.NativeBridge
 import org.json.JSONArray
@@ -61,19 +62,20 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var countBadge: TextView
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
-    private val scanExecutor = Executors.newFixedThreadPool(3)
+    private val scanExecutor = Executors.newFixedThreadPool(2)
     private var pendingArchiveSession: File? = null
     private var allLibraryGames: List<GameEntry> = emptyList()
     private var activeConsoleFilter: String? = null
     private val consoleHintCache = HashMap<String, String>()
     private val gameTitleCache = HashMap<String, String>()
-    private var libraryRenderLimit = 60
+    private var libraryRenderLimit = 24
+    private val coverCache = object : LruCache<String, Bitmap>(24) {}
 
     private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ArchiveHelper.cleanupStale(cacheDir)
+        Thread({ runCatching { ArchiveHelper.cleanupStale(cacheDir) } }, "emuhub-archive-clean").start()
         ensureDefaultPspResolution()
         migrateLegacyFolder()
         renderHome()
@@ -269,18 +271,28 @@ class MainActivity : Activity() {
 
     private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
         val raw = g.name.substringBeforeLast('.', g.name).trim()
-        val generic = setOf("game", "disc", "disk", "image", "rom", "dvd", "cd", "track")
         val folderName = g.folder.trim('/').substringAfterLast('/').trim()
-        val seed = if (raw.lowercase() in generic && folderName.isNotBlank()) folderName else raw
+        val direct = directGameFile(Uri.parse(g.uri))
+        val sidecar = direct?.parentFile?.let { parent ->
+            val base = direct.nameWithoutExtension
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"))
+                .firstOrNull { it.isFile && it.canRead() }
+                ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
+                ?.takeIf { it.isNotBlank() }
+        }
+        if (sidecar != null) return@getOrPut sidecar
+        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm")
+        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs")
+        val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
         seed
-            .replace(Regex("(?i)\[[^]]*(?:SLUS|SLES|SCUS|SCES|ULUS|ULES|NPJH|NPUH|NPUG|USA|EUR|JPN|ASIA|PAL|NTSC)[^]]*]"), " ")
-            .replace(Regex("(?i)\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|En(?:,[A-Za-z]{2})+|Rev ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+)[^)]*\)"), " ")
-            .replace(Regex("(?i)\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ ]?\d{3,6}\b"), " ")
+            .replace(Regex("(?i)\\[[^]]*(?:SLUS|SLES|SCUS|SCES|ULUS|ULES|NPJH|NPUH|NPUG|USA|EUR|JPN|ASIA|PAL|NTSC)[^]]*]"), " ")
+            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|En(?:,[A-Za-z]{2})+|Rev ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+)[^)]*\\)"), " ")
+            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ ]?\\d{3,6}\\b"), " ")
             .replace('_', ' ')
-            .replace(Regex("\s+-\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\s{2,}"), " ")
+            .replace(Regex("\\s+-\\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s{2,}"), " ")
             .trim(' ', '-', '_', '.')
-            .ifBlank { raw }
+            .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
     }
 
     private fun decodeCoverSampled(file: File, reqWidth: Int, reqHeight: Int): Bitmap? = runCatching {
@@ -344,7 +356,7 @@ class MainActivity : Activity() {
         if(rendered.size<sorted.size){
             val more=Button(this).apply{
                 text="SHOW MORE  •  ${sorted.size-rendered.size} REMAINING"
-                setOnClickListener{libraryRenderLimit+=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                setOnClickListener{libraryRenderLimit+=36;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
             }
             library.addView(more,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(48)).apply{topMargin=dp(4);bottomMargin=dp(8)})
         }
@@ -390,15 +402,25 @@ class MainActivity : Activity() {
 
     private fun coverView(g:GameEntry,height:Int):View{
         val frame=FrameLayout(this).apply{background=rounded(systemColorFor(g),18);clipToOutline=true}
-        val cover=localCoverFile(g)
-        if(cover!=null){
-            val bmp=decodeCoverSampled(cover,dp(180),height)
-            if(bmp!=null)frame.addView(ImageView(this).apply{setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
-        }
-        if(frame.childCount==0){
-            frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
-            frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
-            frame.addView(textView(gameTitle(g).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(textView(gameTitle(g).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        val cached=coverCache.get(g.uri)
+        if(cached!=null){
+            frame.addView(ImageView(this).apply{setImageBitmap(cached);scaleType=ImageView.ScaleType.CENTER_CROP},0,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        } else {
+            scanExecutor.execute {
+                val file=localCoverFile(g)
+                val bmp=file?.let{decodeCoverSampled(it,dp(180),height)}
+                if(bmp!=null){
+                    coverCache.put(g.uri,bmp)
+                    frame.post {
+                        if(!isFinishing && frame.isAttachedToWindow){
+                            frame.addView(ImageView(this).apply{setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP},0,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+                        }
+                    }
+                }
+            }
         }
         val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}
         frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})
@@ -512,7 +534,7 @@ class MainActivity : Activity() {
 
     private fun openArchive(uri:Uri,name:String){
         pendingArchiveSession?.deleteRecursively(); pendingArchiveSession=null
-        ArchiveHelper.cleanupStale(cacheDir)
+        Thread({ runCatching { ArchiveHelper.cleanupStale(cacheDir) } }, "emuhub-archive-clean").start()
         status.text="Preparing compressed game • $name"
         scanExecutor.execute{
             try{
