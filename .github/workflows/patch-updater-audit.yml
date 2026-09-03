@@ -14,8 +14,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          p=Path('app/src/main/java/com/ric/emuhub/UpdateActivity.kt')
-          s=p.read_text()
+          p=Path('app/src/main/java/com/ric/emuhub/UpdateActivity.kt'); s=p.read_text()
           s=s.replace('import java.io.IOException\n', 'import java.io.IOException\nimport java.io.FileInputStream\nimport java.security.MessageDigest\n')
           s=s.replace('    private class ReleaseApiException(val code: Int, message: String) : IOException(message)\n', '    private class ReleaseApiException(val code: Int, message: String) : IOException(message)\n    private data class ApkAsset(val url: String, val name: String, val size: Long, val digest: String?)\n')
           s=s.replace('    private var downloadId: Long = -1L\n', '    private var downloadId: Long = -1L\n    @Volatile private var downloadCancelled = false\n')
@@ -43,9 +42,7 @@ jobs:
                             action.setOnClickListener { prepareEnginePackThenDownload(apk) }''')
           s=s.replace('results += "APK asset: " + if (apk != null) "PASS • ${apk.second}" else "FAIL • missing APK"','results += "APK asset: " + if (apk != null) "PASS • ${apk.name} • ${formatBytes(apk.size)}" else "FAIL • missing APK"')
           start=s.index('    private fun findApkAsset('); end=s.index('    private fun installApk(', start)
-          block=Path('.github/updater-block.tmp').read_text() if Path('.github/updater-block.tmp').exists() else None
-          if block is None: raise SystemExit('missing updater block')
-          s=s[:start]+block+s[end:]; p.write_text(s)
+          block=Path('.github/updater-block.tmp').read_text(); s=s[:start]+block+s[end:]; p.write_text(s)
       - name: Commit patch
         run: |
           git config user.name github-actions[bot]
