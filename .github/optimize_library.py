@@ -1,0 +1,70 @@
+from pathlib import Path
+p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+s=p.read_text()
+s=s.replace('import android.widget.Toast\n', 'import android.widget.Toast\nimport android.util.LruCache\n')
+s=s.replace('private val scanExecutor = Executors.newFixedThreadPool(3)', 'private val scanExecutor = Executors.newFixedThreadPool(2)')
+s=s.replace('private var libraryRenderLimit = 60', 'private var libraryRenderLimit = 24\n    private val coverCache = object : LruCache<String, Bitmap>(24) {}')
+s=s.replace('        ArchiveHelper.cleanupStale(cacheDir)\n', '        Thread({ runCatching { ArchiveHelper.cleanupStale(cacheDir) } }, "emuhub-archive-clean").start()\n')
+a=s.index('    private fun gameTitle(g: GameEntry): String')
+b=s.index('    private fun decodeCoverSampled', a)
+title=r'''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
+        val raw = g.name.substringBeforeLast('.', g.name).trim()
+        val folderName = g.folder.trim('/').substringAfterLast('/').trim()
+        val direct = directGameFile(Uri.parse(g.uri))
+        val sidecar = direct?.parentFile?.let { parent ->
+            val base = direct.nameWithoutExtension
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"))
+                .firstOrNull { it.isFile && it.canRead() }
+                ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
+                ?.takeIf { it.isNotBlank() }
+        }
+        if (sidecar != null) return@getOrPut sidecar
+        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm")
+        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs")
+        val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
+        seed
+            .replace(Regex("(?i)\\[[^]]*(?:SLUS|SLES|SCUS|SCES|ULUS|ULES|NPJH|NPUH|NPUG|USA|EUR|JPN|ASIA|PAL|NTSC)[^]]*]"), " ")
+            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|En(?:,[A-Za-z]{2})+|Rev ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+)[^)]*\\)"), " ")
+            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ ]?\\d{3,6}\\b"), " ")
+            .replace('_', ' ')
+            .replace(Regex("\\s+-\\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim(' ', '-', '_', '.')
+            .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
+    }
+
+'''
+s=s[:a]+title+s[b:]
+a=s.index('    private fun coverView(g:GameEntry,height:Int):View{')
+b=s.index('    private fun buildGameTile', a)
+cover='''    private fun coverView(g:GameEntry,height:Int):View{
+        val frame=FrameLayout(this).apply{background=rounded(systemColorFor(g),18);clipToOutline=true}
+        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(textView(gameTitle(g).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        val cached=coverCache.get(g.uri)
+        if(cached!=null){
+            frame.addView(ImageView(this).apply{setImageBitmap(cached);scaleType=ImageView.ScaleType.CENTER_CROP},0,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+        } else {
+            scanExecutor.execute {
+                val file=localCoverFile(g)
+                val bmp=file?.let{decodeCoverSampled(it,dp(180),height)}
+                if(bmp!=null){
+                    coverCache.put(g.uri,bmp)
+                    frame.post {
+                        if(!isFinishing && frame.isAttachedToWindow){
+                            frame.addView(ImageView(this).apply{setImageBitmap(bmp);scaleType=ImageView.ScaleType.CENTER_CROP},0,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
+                        }
+                    }
+                }
+            }
+        }
+        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}
+        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})
+        return frame
+    }
+
+'''
+s=s[:a]+cover+s[b:]
+s=s.replace('libraryRenderLimit+=60', 'libraryRenderLimit+=36')
+p.write_text(s)
