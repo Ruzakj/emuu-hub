@@ -1,0 +1,1 @@
+Lightweight library render limit, smaller cover cache, optimized recent lookup, cleaner local game titles.
