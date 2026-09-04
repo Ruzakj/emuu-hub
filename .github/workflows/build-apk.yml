@@ -5,12 +5,90 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply requested lightweight library patch
+        id: ui_patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          changed=False
+          reps=[
+            ('private var libraryRenderLimit = 24','private var libraryRenderLimit = 12'),
+            ('private val coverCache = object : LruCache<String, Bitmap>(24) {}','private val coverCache = object : LruCache<String, Bitmap>(12) {}'),
+            ('.distinctBy{it.uri}.take(10)','.distinctBy{it.uri}.take(6)'),
+            ('libraryRenderLimit+=36','libraryRenderLimit+=18'),
+            ('libraryRenderLimit=60;renderLibrary','libraryRenderLimit=18;renderLibrary')]
+          for a,b in reps:
+              if a in s: s=s.replace(a,b); changed=True
+          old='val recent=loadRecentlyPlayed().mapNotNull{r->games.firstOrNull{it.uri==r.uri}?:r}.distinctBy{it.uri}.take(6)'
+          if old in s:
+              s=s.replace(old,'val byUri=games.associateBy{it.uri}\n        val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)'); changed=True
+          start=s.find('    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {')
+          end=s.find('\n    private fun decodeCoverSampled',start)
+          if start>=0 and end>start:
+              block='''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
+        val raw = g.name.substringBeforeLast('.', g.name).trim()
+        val folderName = g.folder.trim('/').substringAfterLast('/').trim()
+        val direct = directGameFile(Uri.parse(g.uri))
+        val sidecar = direct?.parentFile?.let { parent ->
+            val base = direct.nameWithoutExtension
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"), File(parent, "game.title.txt"))
+                .firstOrNull { it.isFile && it.canRead() }
+                ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
+                ?.takeIf { it.isNotBlank() }
+        }
+        if (sidecar != null) return@getOrPut sidecar
+        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm", "pbp")
+        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs","playstation","playstation 2")
+        val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
+        seed
+            .replace(Regex("(?i)^\\s*(?:sony\\s+)?(?:playstation\\s*2|playstation|ps2|ps1|psx|psp)\\s*[-_:|]+\\s*"), "")
+            .replace(Regex("(?i)\\[[^]]*]"), " ")
+            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\\)"), " ")
+            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\\d{3,6}\\b"), " ")
+            .replace(Regex("(?i)\\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\\d*|REPACK|PROPER|RIP|FULL)\\b"), " ")
+            .replace('_', ' ')
+            .replace(Regex("\\s{2,}"), " ")
+            .trim(' ', '-', '_', '.', '[', ']', '(', ')')
+            .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
+    }
+'''
+              if s[start:end] != block.rstrip('\n'):
+                  s=s[:start]+block+s[end:]; changed=True
+          a='        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))\n'
+          if a in s: s=s.replace(a,''); changed=True
+          a='        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}\n        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})\n'
+          if a in s: s=s.replace(a,''); changed=True
+          p.write_text(s)
+          print('changed='+str(changed).lower())
+          PY
+          git show HEAD^:.github/workflows/build-apk.yml > .github/workflows/build-apk.yml
+          git show 8ba30639d4cd01bf45bb9c1cfd5310a055b9c0b4:.github/workflows/apply-z9x-smooth-profile.yml > .github/workflows/apply-z9x-smooth-profile.yml
+          rm -f .github/workflows/patch-light-ui-title.yml
+          if ! git diff --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -A
+            git commit -m "Lighten library UI and normalize game titles"
+            git push
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -120,23 +198,15 @@ jobs:
           rm -rf /tmp/armsx2-runtime
           mkdir -p /tmp/armsx2-runtime app/src/main/jniLibs/arm64-v8a app/src/main/assets/ARMSX2
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ARMSX2-Android-ARM64-Runtime -D /tmp/armsx2-runtime
-
           test -d /tmp/armsx2-runtime/jniLibs/arm64-v8a
           test -d /tmp/armsx2-runtime/assets/ARMSX2
-
           cp -a /tmp/armsx2-runtime/jniLibs/arm64-v8a/. app/src/main/jniLibs/arm64-v8a/
           rm -rf app/src/main/assets/ARMSX2
           mkdir -p app/src/main/assets/ARMSX2
           cp -a /tmp/armsx2-runtime/assets/ARMSX2/. app/src/main/assets/ARMSX2/
-
-          echo 'ARMSX2 lean native runtime staged:'
-          find app/src/main/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/assets/ARMSX2/GameIndex.yaml
-          if readelf -d app/src/main/jniLibs/arm64-v8a/libemucore_4k.so | grep -q 'liblibrashader_capi.so'; then
-            echo 'ERROR: staged lean core still depends on librashader' >&2
-            exit 1
-          fi
+          if readelf -d app/src/main/jniLibs/arm64-v8a/libemucore_4k.so | grep -q 'liblibrashader_capi.so'; then exit 1; fi
 
       - name: Verify emulator cores
         run: |
@@ -171,3 +241,16 @@ jobs:
           name: EmuHub-InternalCores-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish this patch to in-app updater
+        if: steps.ui_patch.outputs.applied == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
+          CODE=$(($(echo "$LATEST" | jq -r '.tag_name' | sed 's/^v//') + 1))
+          NAME=$(echo "$LATEST" | jq -r '.name' | sed -E 's/^Emu Hub[[:space:]]+//')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$NAME"
+          PATCH=$((PATCH + 1))
+          NEXT="$MAJOR.$MINOR.$PATCH"
+          gh workflow run release-apk.yml --repo "$GITHUB_REPOSITORY" --ref main -f version_code="$CODE" -f version_name="$NEXT" -f notes="Lighter game library UI + cleaner game titles" -f thin_shell=true
