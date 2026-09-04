@@ -1,4 +1,4 @@
-name: Apply iQOO Z9x Smooth PS2 Profile
+name: Apply lightweight library and clean titles
 on:
   push:
     paths:
@@ -12,33 +12,58 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply Z9x smooth profile
+      - name: Patch library UI
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
           s=p.read_text()
-          s=s.replace('NativeApp.setAffinityMode(7)', 'NativeApp.setAffinityMode(0)')
-          s=s.replace('NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-1")', 'NativeApp.setSetting("EmuCore/Speedhacks", "EECycleRate", "int", "-2")')
-          needle='runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }'
-          repl='''runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "EECycleSkip", "int", "0") }
-            // Z9x: let Android float EE/VU threads instead of hard pinning them. ARMSX2 GoW2 profiling found VU starvation from pinning.
-            runCatching { NativeApp.setSetting("EmuCore", "EnableThreadPinning", "bool", "false") }
-            // Keep presentation latency low without synchronizing emulation to the 120 Hz panel.
-            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncEnable", "bool", "false") }
-            runCatching { NativeApp.setSetting("EmuCore/GS", "SyncToHostRefreshRate", "bool", "false") }
-            runCatching { NativeApp.setSetting("EmuCore/GS", "UseVSyncForTiming", "bool", "false") }
-            runCatching { NativeApp.setSetting("EmuCore/GS", "SkipDuplicateFrames", "bool", "true") }
-            runCatching { NativeApp.setSetting("EmuCore/GS", "VsyncQueueSize", "int", "1") }
-            // Audio follows emulation speed; avoid host-refresh timing pressure that amplifies crackle during EE/VU spikes.
-            runCatching { NativeApp.setSetting("EmuCore", "CdvdPrecache", "bool", "false") }'''
-          if needle not in s: raise SystemExit('target speedhack block not found')
-          s=s.replace(needle,repl,1)
-          s=s.replace('PS2 • Vulkan 2x • PERF CORES', 'PS2 • Vulkan 2x • Z9X SMOOTH')
+          s=s.replace('private var libraryRenderLimit = 24','private var libraryRenderLimit = 12')
+          s=s.replace('private val coverCache = object : LruCache<String, Bitmap>(24) {}','private val coverCache = object : LruCache<String, Bitmap>(12) {}')
+          s=s.replace('.distinctBy{it.uri}.take(10)','.distinctBy{it.uri}.take(6)')
+          s=s.replace('libraryRenderLimit+=36','libraryRenderLimit+=18')
+          s=s.replace('libraryRenderLimit=60;renderLibrary','libraryRenderLimit=18;renderLibrary')
+          old='val recent=loadRecentlyPlayed().mapNotNull{r->games.firstOrNull{it.uri==r.uri}?:r}.distinctBy{it.uri}.take(6)'
+          new='val byUri=games.associateBy{it.uri}\n        val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)'
+          s=s.replace(old,new)
+          start=s.index('    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {')
+          end=s.index('\n    private fun decodeCoverSampled',start)
+          block='''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
+        val raw = g.name.substringBeforeLast('.', g.name).trim()
+        val folderName = g.folder.trim('/').substringAfterLast('/').trim()
+        val direct = directGameFile(Uri.parse(g.uri))
+        val sidecar = direct?.parentFile?.let { parent ->
+            val base = direct.nameWithoutExtension
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"), File(parent, "game.title.txt"))
+                .firstOrNull { it.isFile && it.canRead() }
+                ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
+                ?.takeIf { it.isNotBlank() }
+        }
+        if (sidecar != null) return@getOrPut sidecar
+        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm", "pbp")
+        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs","playstation","playstation 2")
+        val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
+        seed
+            .replace(Regex("(?i)^\\s*(?:sony\\s+)?(?:playstation\\s*2|playstation|ps2|ps1|psx|psp)\\s*[-_:|]+\\s*"), "")
+            .replace(Regex("(?i)\\[[^]]*]"), " ")
+            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\\)"), " ")
+            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\\d{3,6}\\b"), " ")
+            .replace(Regex("(?i)\\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\\d*|REPACK|PROPER|RIP|FULL)\\b"), " ")
+            .replace('_', ' ')
+            .replace(Regex("\\s{2,}"), " ")
+            .trim(' ', '-', '_', '.', '[', ']', '(', ')')
+            .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
+    }
+'''
+          s=s[:start]+block+s[end:]
+          s=s.replace('        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))\n','')
+          s=s.replace('        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}\n        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})\n','')
           p.write_text(s)
           PY
+          git show HEAD^:.github/workflows/apply-z9x-smooth-profile.yml > .github/workflows/apply-z9x-smooth-profile.yml
+          rm -f .github/workflows/patch-light-ui-title.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
-          git commit -m "Tune PS2 2x smooth profile for iQOO Z9x"
+          git add -A
+          git commit -m "Lighten library UI and normalize game titles"
           git push
