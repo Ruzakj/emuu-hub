@@ -282,16 +282,16 @@ class MainActivity : Activity() {
         }
         if (sidecar != null) return@getOrPut sidecar
         val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm", "pbp")
-        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs","playstation","playstation 2")
+        val genericFolders = setOf("ps1", "ps2", "psp", "rom", "roms", "games", "game", "iso", "isos", "disc", "discs", "playstation", "playstation 2")
         val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
         seed
-            .replace(Regex("(?i)^\s*(?:sony\s+)?(?:playstation\s*2|playstation|ps2|ps1|psx|psp)\s*[-_:|]+\s*"), "")
-            .replace(Regex("(?i)\[[^]]*]"), " ")
-            .replace(Regex("(?i)\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\)"), " ")
-            .replace(Regex("(?i)\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\d{3,6}\b"), " ")
-            .replace(Regex("(?i)\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\d*|REPACK|PROPER|RIP|FULL)\b"), " ")
+            .replace(Regex("""(?i)^\s*(?:sony\s+)?(?:playstation\s*2|playstation|ps2|ps1|psx|psp)\s*[-_:|]+\s*"""), "")
+            .replace(Regex("""(?i)\[[^]]*]"""), " ")
+            .replace(Regex("""(?i)\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\)"""), " ")
+            .replace(Regex("""(?i)\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\d{3,6}\b"""), " ")
+            .replace(Regex("""(?i)\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\d*|REPACK|PROPER|RIP|FULL)\b"""), " ")
             .replace('_', ' ')
-            .replace(Regex("\s{2,}"), " ")
+            .replace(Regex("""\s{2,}"""), " ")
             .trim(' ', '-', '_', '.', '[', ']', '(', ')')
             .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
     }
