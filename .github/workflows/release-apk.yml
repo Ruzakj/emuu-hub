@@ -167,14 +167,48 @@ jobs:
       - name: Publish GitHub Release used by in-app updater
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
           TAG="v${EMUHUB_VERSION_CODE}"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Increase version_code." >&2
-            exit 1
+          TITLE="Emu Hub ${EMUHUB_VERSION_NAME}"
+          NOTES='${{ inputs.notes }}'
+
+          # Create metadata separately so a transient asset-upload failure is recoverable.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            created=false
+            for attempt in 1 2 3 4 5; do
+              echo "Create release $TAG attempt $attempt/5"
+              if gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES"; then
+                created=true
+                break
+              fi
+              # GitHub can return 5xx after actually creating the release. Re-check before retrying.
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                created=true
+                break
+              fi
+              sleep $((attempt * 4))
+            done
+            $created || { echo "Could not create $TAG after retries" >&2; exit 1; }
           fi
-          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Emu Hub ${EMUHUB_VERSION_NAME}" --notes "${{ inputs.notes }}"
+
+          # Upload/repair assets idempotently. --clobber makes retries safe.
+          uploaded=false
+          for attempt in 1 2 3 4 5; do
+            echo "Upload release assets attempt $attempt/5"
+            if gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then
+              uploaded=true
+              break
+            fi
+            sleep $((attempt * 4))
+          done
+          $uploaded || { echo "Could not upload release assets after retries" >&2; exit 1; }
+
+          ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          echo "$ASSETS" | grep -qE '\.apk$' || { echo 'Published release has no APK asset' >&2; exit 1; }
+          echo "$ASSETS" | grep -qx 'SHA256SUMS.txt' || { echo 'Published release has no checksum asset' >&2; exit 1; }
+          echo "Release $TAG is complete and ready for the in-app updater."
 
       - uses: actions/upload-artifact@v4
         with:
