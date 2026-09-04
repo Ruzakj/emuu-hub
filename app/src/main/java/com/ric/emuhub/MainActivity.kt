@@ -68,8 +68,8 @@ class MainActivity : Activity() {
     private var activeConsoleFilter: String? = null
     private val consoleHintCache = HashMap<String, String>()
     private val gameTitleCache = HashMap<String, String>()
-    private var libraryRenderLimit = 24
-    private val coverCache = object : LruCache<String, Bitmap>(24) {}
+    private var libraryRenderLimit = 12
+    private val coverCache = object : LruCache<String, Bitmap>(12) {}
 
     private fun dp(v:Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -192,7 +192,7 @@ class MainActivity : Activity() {
                 addView(textView(if(count==null)item[1] else "${count} game",8.5f,0xFF6F7988.toInt()).apply{maxLines=1},LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=dp(1)})
                 when(item[0]){
                     "JAVA"->setOnClickListener{startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))}
-                    else->setOnClickListener{activeConsoleFilter=if(activeConsoleFilter==item[0])null else item[0];libraryRenderLimit=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                    else->setOnClickListener{activeConsoleFilter=if(activeConsoleFilter==item[0])null else item[0];libraryRenderLimit=18;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
                 }
             }
             row.addView(chip,LinearLayout.LayoutParams(dp(86),dp(88)).apply{if(index>0)leftMargin=dp(8)})
@@ -275,23 +275,24 @@ class MainActivity : Activity() {
         val direct = directGameFile(Uri.parse(g.uri))
         val sidecar = direct?.parentFile?.let { parent ->
             val base = direct.nameWithoutExtension
-            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"))
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"), File(parent, "game.title.txt"))
                 .firstOrNull { it.isFile && it.canRead() }
                 ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
                 ?.takeIf { it.isNotBlank() }
         }
         if (sidecar != null) return@getOrPut sidecar
-        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm")
-        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs")
+        val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm", "pbp")
+        val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs","playstation","playstation 2")
         val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
         seed
-            .replace(Regex("(?i)\\[[^]]*(?:SLUS|SLES|SCUS|SCES|ULUS|ULES|NPJH|NPUH|NPUG|USA|EUR|JPN|ASIA|PAL|NTSC)[^]]*]"), " ")
-            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|En(?:,[A-Za-z]{2})+|Rev ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+)[^)]*\\)"), " ")
-            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ ]?\\d{3,6}\\b"), " ")
+            .replace(Regex("(?i)^\s*(?:sony\s+)?(?:playstation\s*2|playstation|ps2|ps1|psx|psp)\s*[-_:|]+\s*"), "")
+            .replace(Regex("(?i)\[[^]]*]"), " ")
+            .replace(Regex("(?i)\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\)"), " ")
+            .replace(Regex("(?i)\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\d{3,6}\b"), " ")
+            .replace(Regex("(?i)\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\d*|REPACK|PROPER|RIP|FULL)\b"), " ")
             .replace('_', ' ')
-            .replace(Regex("\\s+-\\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\s{2,}"), " ")
-            .trim(' ', '-', '_', '.')
+            .replace(Regex("\s{2,}"), " ")
+            .trim(' ', '-', '_', '.', '[', ']', '(', ')')
             .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
     }
 
@@ -313,7 +314,8 @@ class MainActivity : Activity() {
         countBadge.text="${visible.size} GAMES"
         status.text=if(activeConsoleFilter==null)"$label • tap a game and Emu Hub picks the engine" else "${activeConsoleFilter} • ${visible.size} game"
 
-        val recent=loadRecentlyPlayed().mapNotNull{r->games.firstOrNull{it.uri==r.uri}?:r}.distinctBy{it.uri}.take(10)
+        val byUri=games.associateBy{it.uri}
+        val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)
         if(recent.isNotEmpty()){
             val recentHeader=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
             recentHeader.addView(textView("RECENTLY PLAYED",10.5f,0xFFB9C3D1.toInt(),true).apply{letterSpacing=0.12f},LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
@@ -356,7 +358,7 @@ class MainActivity : Activity() {
         if(rendered.size<sorted.size){
             val more=Button(this).apply{
                 text="SHOW MORE  •  ${sorted.size-rendered.size} REMAINING"
-                setOnClickListener{libraryRenderLimit+=36;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                setOnClickListener{libraryRenderLimit+=18;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
             }
             library.addView(more,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(48)).apply{topMargin=dp(4);bottomMargin=dp(8)})
         }
@@ -374,7 +376,7 @@ class MainActivity : Activity() {
                 setPadding(dp(15),0,dp(15),0);isClickable=true;isFocusable=true
                 setOnClickListener{
                     if(label=="JAVA")startActivity(Intent(this@MainActivity,J2meLibraryActivity::class.java))
-                    else{activeConsoleFilter=if(label=="ALL")null else label;libraryRenderLimit=60;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
+                    else{activeConsoleFilter=if(label=="ALL")null else label;libraryRenderLimit=18;renderLibrary(allLibraryGames,"${allLibraryGames.size} game")}
                 }
             }
             row.addView(chip,LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(36)).apply{if(i>0)leftMargin=dp(7)})
@@ -402,7 +404,6 @@ class MainActivity : Activity() {
 
     private fun coverView(g:GameEntry,height:Int):View{
         val frame=FrameLayout(this).apply{background=rounded(systemColorFor(g),18);clipToOutline=true}
-        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(textView(systemCodeFor(g),10f,0xFFDCE7F2.toInt(),true).apply{gravity=Gravity.TOP or Gravity.START;setPadding(dp(12),dp(11),0,0);letterSpacing=0.10f},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(textView(gameTitle(g).take(42),17f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.BOTTOM or Gravity.START;setPadding(dp(12),0,dp(10),dp(14));maxLines=3},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         val cached=coverCache.get(g.uri)
@@ -422,8 +423,6 @@ class MainActivity : Activity() {
                 }
             }
         }
-        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}
-        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})
         return frame
     }
 
