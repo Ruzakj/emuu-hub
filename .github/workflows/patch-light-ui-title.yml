@@ -2,7 +2,8 @@ name: Patch lightweight UI and game titles
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/patch-light-ui-title.yml']
+    paths:
+      - .github/workflows/patch-light-ui-title.yml
 permissions:
   contents: write
 jobs:
@@ -11,75 +12,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Patch MainActivity
-        shell: python
+        shell: bash
         run: |
+          cat > /tmp/patch.py <<'PY'
           from pathlib import Path
-          p = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
-          s = p.read_text()
-
-          # Reduce first-frame view inflation and bitmap memory pressure.
-          s = s.replace('private var libraryRenderLimit = 24', 'private var libraryRenderLimit = 12')
-          s = s.replace('private val coverCache = object : LruCache<String, Bitmap>(24) {}', 'private val coverCache = object : LruCache<String, Bitmap>(12) {}')
-          s = s.replace('.distinctBy{it.uri}.take(10)', '.distinctBy{it.uri}.take(6)')
-          s = s.replace('libraryRenderLimit+=36', 'libraryRenderLimit+=18')
-          s = s.replace('libraryRenderLimit=60;renderLibrary', 'libraryRenderLimit=18;renderLibrary')
-
-          # Avoid O(recent * library) lookup on every render.
-          old = 'val recent=loadRecentlyPlayed().mapNotNull{r->games.firstOrNull{it.uri==r.uri}?:r}.distinctBy{it.uri}.take(6)'
-          new = 'val byUri=games.associateBy{it.uri}\n        val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)'
-          if old in s:
-              s = s.replace(old, new)
-
-          # Stronger local/offline title normalization: folder/sidecar first, then clean dump filename.
-          old_block_start = s.index('    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {')
-          old_block_end = s.index('\n    private fun decodeCoverSampled', old_block_start)
-          new_block = r'''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          s=s.replace('private var libraryRenderLimit = 24','private var libraryRenderLimit = 12')
+          s=s.replace('private val coverCache = object : LruCache<String, Bitmap>(24) {}','private val coverCache = object : LruCache<String, Bitmap>(12) {}')
+          s=s.replace('.distinctBy{it.uri}.take(10)','.distinctBy{it.uri}.take(6)')
+          s=s.replace('libraryRenderLimit+=36','libraryRenderLimit+=18')
+          s=s.replace('libraryRenderLimit=60;renderLibrary','libraryRenderLimit=18;renderLibrary')
+          old='val recent=loadRecentlyPlayed().mapNotNull{r->games.firstOrNull{it.uri==r.uri}?:r}.distinctBy{it.uri}.take(6)'
+          new='val byUri=games.associateBy{it.uri}\n        val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)'
+          s=s.replace(old,new)
+          start=s.index('    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {')
+          end=s.index('\n    private fun decodeCoverSampled',start)
+          block='''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrPut(g.uri) {
         val raw = g.name.substringBeforeLast('.', g.name).trim()
         val folderName = g.folder.trim('/').substringAfterLast('/').trim()
         val direct = directGameFile(Uri.parse(g.uri))
         val sidecar = direct?.parentFile?.let { parent ->
             val base = direct.nameWithoutExtension
-            listOf(
-                File(parent, "$base.title.txt"),
-                File(parent, "$base.name.txt"),
-                File(parent, "title.txt"),
-                File(parent, "game.title.txt")
-            ).firstOrNull { it.isFile && it.canRead() }
+            listOf(File(parent, "$base.title.txt"), File(parent, "$base.name.txt"), File(parent, "title.txt"), File(parent, "game.title.txt"))
+                .firstOrNull { it.isFile && it.canRead() }
                 ?.let { runCatching { it.useLines { lines -> lines.firstOrNull()?.trim() }.orEmpty() }.getOrDefault("") }
                 ?.takeIf { it.isNotBlank() }
         }
         if (sidecar != null) return@getOrPut sidecar
-
         val discLike = g.ext.lowercase() in setOf("iso", "cso", "chd", "bin", "cue", "ecm", "pbp")
         val genericFolders = setOf("ps1","ps2","psp","rom","roms","games","game","iso","isos","disc","discs","playstation","playstation 2")
         val seed = if (discLike && folderName.isNotBlank() && folderName.lowercase() !in genericFolders) folderName else raw
-
         seed
-            .replace(Regex("(?i)^\\s*(?:sony\\s+)?(?:playstation\\s*2|playstation|ps2|ps1|psx|psp)\\s*[-_:|]+\\s*"), "")
-            .replace(Regex("(?i)\\[[^]]*]"), " ")
-            .replace(Regex("(?i)\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\\)"), " ")
-            .replace(Regex("(?i)\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\\d{3,6}\\b"), " ")
-            .replace(Regex("(?i)\\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\\d*|REPACK|PROPER|RIP|FULL)\\b"), " ")
+            .replace(Regex("(?i)^\\\\s*(?:sony\\\\s+)?(?:playstation\\\\s*2|playstation|ps2|ps1|psx|psp)\\\\s*[-_:|]+\\\\s*"), "")
+            .replace(Regex("(?i)\\\\[[^]]*]"), " ")
+            .replace(Regex("(?i)\\\\([^)]*(?:USA|Europe|EUR|Japan|JPN|Asia|World|PAL|NTSC|En(?:,[A-Za-z]{2})*|Rev(?:ision)? ?[A-Z0-9]*|Disc ?[0-9]+|Disk ?[0-9]+|Beta|Demo)[^)]*\\\\)"), " ")
+            .replace(Regex("(?i)\\\\b(?:SLUS|SLES|SCUS|SCES|SLPS|SLPM|SCPS|ULUS|ULES|UCUS|UCES|NPJH|NPUH|NPUG)[-_ .]?\\\\d{3,6}\\\\b"), " ")
+            .replace(Regex("(?i)\\\\b(?:USA|EUR|JPN|PAL|NTSC|MULTI\\\\d*|REPACK|PROPER|RIP|FULL)\\\\b"), " ")
             .replace('_', ' ')
-            .replace('.', ' ')
-            .replace(Regex("\\s+-\\s+(?:PSP|PS2|PSX|PS1)$", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\s{2,}"), " ")
+            .replace(Regex("\\\\s{2,}"), " ")
             .trim(' ', '-', '_', '.', '[', ']', '(', ')')
             .ifBlank { folderName.takeIf { it.isNotBlank() } ?: raw }
     }
 '''
-          s = s[:old_block_start] + new_block + s[old_block_end:]
-
-          # Cheaper cover fallback: remove duplicate giant console glyph and engine badge.
-          s = s.replace('        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))\n', '')
-          s = s.replace('        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}\n        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})\n', '')
-
+          s=s[:start]+block+s[end:]
+          s=s.replace('        frame.addView(textView(consoleGlyph(g),34f,0x44FFFFFF,true).apply{gravity=Gravity.TOP or Gravity.END;setPadding(0,dp(8),dp(12),0)},FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))\n','')
+          s=s.replace('        val engine=textView(engineLabel(g),8.5f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0x99000000.toInt(),10);setPadding(dp(8),dp(4),dp(8),dp(4))}\n        frame.addView(engine,FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,Gravity.TOP or Gravity.END).apply{topMargin=dp(9);rightMargin=dp(9)})\n','')
           p.write_text(s)
-      - name: Commit patch and cleanup workflow
+          PY
+          python3 /tmp/patch.py
+      - name: Commit and cleanup
+        shell: bash
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           rm -f .github/workflows/patch-light-ui-title.yml
-          git add app/src/main/java/com/ric/emuhub/MainActivity.kt .github/workflows/patch-light-ui-title.yml
+          git add -A
           git commit -m "Lighten library UI and normalize game titles"
           git push
