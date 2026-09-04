@@ -15,7 +15,6 @@ jobs:
       - name: Apply patch
         run: |
           python3 .github/patch_light_ui.py
-          git show 8ba30639d4cd01bf45bb9c1cfd5310a055b9c0b4:.github/workflows/apply-z9x-smooth-profile.yml > .github/workflows/apply-z9x-smooth-profile.yml
           rm -f .github/patch_light_ui.py .github/workflows/patch-light-ui-title.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
