@@ -29,17 +29,20 @@ jobs:
           if not m:
               raise SystemExit('Quick Tune dialog pattern not found')
           indent = m.group(1)
-          replacement = f'''{indent}val scroll = ScrollView(this).apply {{
-{indent}    isFillViewport = true
-{indent}    addView(panel, ScrollView.LayoutParams(
-{indent}        ViewGroup.LayoutParams.MATCH_PARENT,
-{indent}        ViewGroup.LayoutParams.WRAP_CONTENT
-{indent}    ))
-{indent}}}
-{indent}AlertDialog.Builder(this)
-{indent}    .setTitle("PS2 QUICK TUNE • ${{File(romPath).nameWithoutExtension}}")
-{indent}    .setView(scroll)
-{indent}    .setPositiveButton("DONE", null)'''
+          title_expr = '$' + '{File(romPath).nameWithoutExtension}'
+          replacement = (
+              indent + 'val scroll = ScrollView(this).apply {\n' +
+              indent + '    isFillViewport = true\n' +
+              indent + '    addView(panel, ScrollView.LayoutParams(\n' +
+              indent + '        ViewGroup.LayoutParams.MATCH_PARENT,\n' +
+              indent + '        ViewGroup.LayoutParams.WRAP_CONTENT\n' +
+              indent + '    ))\n' +
+              indent + '}\n' +
+              indent + 'AlertDialog.Builder(this)\n' +
+              indent + '    .setTitle("PS2 QUICK TUNE • ' + title_expr + '")\n' +
+              indent + '    .setView(scroll)\n' +
+              indent + '    .setPositiveButton("DONE", null)'
+          )
           s = pattern.sub(replacement, s, count=1)
           p.write_text(s)
           PY
