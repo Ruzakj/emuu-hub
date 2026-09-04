@@ -1,0 +1,1 @@
+PS2 Quick Tune scrollable menu: Cycle Skip, MTVU, per-game save/reset visible.
