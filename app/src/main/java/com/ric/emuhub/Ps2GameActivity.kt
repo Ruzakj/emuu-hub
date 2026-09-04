@@ -22,6 +22,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import kr.co.iefriends.pcsx2.NativeApp
@@ -437,9 +438,26 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             }
         })
 
+        val scroll = ScrollView(this).apply {
+
+            isFillViewport = true
+
+            addView(panel, ScrollView.LayoutParams(
+
+                ViewGroup.LayoutParams.MATCH_PARENT,
+
+                ViewGroup.LayoutParams.WRAP_CONTENT
+
+            ))
+
+        }
+
         AlertDialog.Builder(this)
-            .setTitle("PS2 QUICK TUNE • ${File(romPath).name}")
-            .setView(panel)
+
+            .setTitle("PS2 QUICK TUNE • ${File(romPath).nameWithoutExtension}")
+
+            .setView(scroll)
+
             .setPositiveButton("DONE", null)
             .create().also { dialog ->
                 dialog.setOnDismissListener { if (!isFinishing && initialized && vmStarted.get()) runCatching { NativeApp.resume() } }
