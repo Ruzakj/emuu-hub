@@ -32,3 +32,4 @@ block='''    private fun gameTitle(g: GameEntry): String = gameTitleCache.getOrP
 
 '''
 p.write_text(s[:start]+block+s[end:])
+# trigger
