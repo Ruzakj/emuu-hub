@@ -247,7 +247,8 @@ class MainActivity : Activity() {
             "nes"->"NES"
             "sfc","smc"->"SNES"
             "xci","nsp","nro"->"SWITCH"
-            "iso","chd"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
+            "iso"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
+            "chd"->folderConsoleHint(g) ?: "DISC"
             in ARCHIVES->"ARCHIVE"
             else->"OTHER"
         }
@@ -715,7 +716,7 @@ class MainActivity : Activity() {
             Toast.makeText(this,"ISO/CHD PS2 tidak dicopy ke cache. Simpan game di penyimpanan internal/SD lalu tambahkan foldernya ke Emu Hub.",Toast.LENGTH_LONG).show()
             return
         }
-        status.text="PS2 • direct storage • ARMSX2 Vulkan"
+        status.text="PS2 • ISO/CHD direct • ARMSX2 Vulkan"
         startActivity(Intent(this,Ps2GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("romName",name))
     }
 

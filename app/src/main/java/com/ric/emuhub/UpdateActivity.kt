@@ -154,7 +154,7 @@ class UpdateActivity : Activity() {
         checkCard.addView(tv("LATEST RELEASE", 9f, 0xFF738094.toInt(), true).apply { letterSpacing = 0.14f })
         status = tv("Checking GitHub Release…", 14f, 0xFFF2F5F8.toInt(), true)
         checkCard.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) })
-        progress = ProgressBar(this).apply { isIndeterminate = true }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true; max = 100 }
         checkCard.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10); gravity = Gravity.CENTER_HORIZONTAL })
         content.addView(checkCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(11) })
 
@@ -344,36 +344,95 @@ class UpdateActivity : Activity() {
         val dir = File(getExternalFilesDir(null), "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.deleteRecursively() }
         val apk = File(dir, asset.name.ifBlank { "EmuHub-update.apk" })
-        pendingApk = apk; downloadCancelled = false
-        val request = DownloadManager.Request(Uri.parse(asset.url)).setTitle("Emu Hub update").setDescription("Downloading ${formatBytes(asset.size)} signed update").setMimeType(APK_MIME).setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setDestinationUri(Uri.fromFile(apk))
-        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-        runCatching {
-            downloadId = dm.enqueue(request)
-            progress.isIndeterminate = false; progress.max = 100; progress.progress = 0; progress.visibility = View.VISIBLE
-            action.text = "CANCEL DOWNLOAD"; action.isEnabled = true
-            action.setOnClickListener { downloadCancelled = true; dm.remove(downloadId); apk.delete(); pendingApk = null; progress.visibility = View.GONE; status.text = "Download cancelled • temporary file cleaned"; action.text = "CHECK AGAIN"; action.setOnClickListener { checkUpdate() } }
-            Thread({ monitorDownload(dm, asset, apk) }, "emuhub-update-progress").start()
-        }.onFailure { apk.delete(); pendingApk = null; progress.visibility = View.GONE; status.text = "Download failed • temporary file cleaned"; action.text = "TRY AGAIN"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } }
+        val part = File(dir, apk.name + ".part")
+        pendingApk = null
+        downloadCancelled = false
+        progress.isIndeterminate = false
+        progress.max = 100
+        progress.progress = 0
+        progress.visibility = View.VISIBLE
+        status.text = "Connecting • ${formatBytes(asset.size)}"
+        action.text = "CANCEL DOWNLOAD"
+        action.isEnabled = true
+        action.setOnClickListener {
+            downloadCancelled = true
+            part.delete()
+            apk.delete()
+            pendingApk = null
+            progress.visibility = View.GONE
+            status.text = "Download cancelled • temporary file cleaned"
+            action.text = "CHECK AGAIN"
+            action.setOnClickListener { checkUpdate() }
+        }
+        Thread({ downloadDirect(asset, part, apk) }, "emuhub-update-download").start()
     }
 
-    private fun monitorDownload(dm: DownloadManager, asset: ApkAsset, apk: File) {
-        while (!downloadCancelled && downloadId >= 0L) {
-            var done = false
-            runCatching {
-                dm.query(DownloadManager.Query().setFilterById(downloadId)).use { c ->
-                    if (!c.moveToFirst()) { done = true; return@use }
-                    val state = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    val got = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                    val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)).takeIf { it > 0 } ?: asset.size
-                    if (state == DownloadManager.STATUS_SUCCESSFUL) done = true else if (state == DownloadManager.STATUS_FAILED) throw IOException("DownloadManager failed")
-                    if (total > 0) runOnUiThread { val pct = ((got * 100L) / total).coerceIn(0L, 100L).toInt(); progress.progress = pct; status.text = "Downloading • $pct% • ${formatBytes(got)} / ${formatBytes(total)}" }
+    private fun downloadDirect(asset: ApkAsset, part: File, apk: File) {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = URL(asset.url).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 12_000
+            connection.readTimeout = 45_000
+            connection.setRequestProperty("User-Agent", "EmuHub-Updater/${BuildConfig.VERSION_NAME}")
+            connection.setRequestProperty("Accept", APK_MIME)
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException("Download HTTP $code")
+            val total = connection.contentLengthLong.takeIf { it > 0L } ?: asset.size
+            var received = 0L
+            var lastUi = 0L
+            part.parentFile?.mkdirs()
+            connection.inputStream.buffered(1024 * 1024).use { input ->
+                part.outputStream().buffered(1024 * 1024).use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        if (downloadCancelled) throw java.util.concurrent.CancellationException("cancelled")
+                        val n = input.read(buffer)
+                        if (n <= 0) break
+                        output.write(buffer, 0, n)
+                        received += n
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastUi >= 180L && total > 0L) {
+                            lastUi = now
+                            val pct = ((received * 100L) / total).coerceIn(0L, 100L).toInt()
+                            runOnUiThread {
+                                progress.progress = pct
+                                status.text = "Downloading • $pct% • ${formatBytes(received)} / ${formatBytes(total)}"
+                            }
+                        }
+                    }
                 }
-            }.onFailure { dm.remove(downloadId); apk.delete(); pendingApk = null; done = true; runOnUiThread { progress.visibility = View.GONE; status.text = "Download failed • temporary file cleaned"; action.text = "RETRY"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } } }
-            if (done) break
-            try { Thread.sleep(500) } catch (_: InterruptedException) { break }
+            }
+            if (downloadCancelled) throw java.util.concurrent.CancellationException("cancelled")
+            if (apk.exists()) apk.delete()
+            if (!part.renameTo(apk)) {
+                part.copyTo(apk, overwrite = true)
+                part.delete()
+            }
+            verifyDownloadedApk(apk, asset)
+            pendingApk = apk
+            runOnUiThread {
+                progress.progress = 100
+                status.text = "Verified • ${formatBytes(apk.length())} • ready to install"
+                action.text = "INSTALL UPDATE"
+                action.isEnabled = true
+                action.setOnClickListener { installApk(apk) }
+                installApk(apk)
+            }
+        } catch (_: java.util.concurrent.CancellationException) {
+            part.delete(); apk.delete(); pendingApk = null
+        } catch (e: Exception) {
+            part.delete(); apk.delete(); pendingApk = null
+            runOnUiThread {
+                progress.visibility = View.GONE
+                status.text = "Download failed • ${friendlyError(e)} • temporary file cleaned"
+                action.text = "RETRY DOWNLOAD"
+                action.isEnabled = true
+                action.setOnClickListener { downloadUpdate(asset) }
+            }
+        } finally {
+            connection?.disconnect()
         }
-        if (downloadCancelled || !apk.isFile) return
-        runCatching { verifyDownloadedApk(apk, asset) }.onSuccess { runOnUiThread { progress.progress = 100; status.text = "Verified • ${formatBytes(apk.length())} • ready to install"; action.text = "INSTALL UPDATE"; action.isEnabled = true; action.setOnClickListener { installApk(apk) }; installApk(apk) } }.onFailure { apk.delete(); pendingApk = null; runOnUiThread { progress.visibility = View.GONE; status.text = "Update file corrupt • cleaned safely"; action.text = "RETRY DOWNLOAD"; action.isEnabled = true; action.setOnClickListener { downloadUpdate(asset) } } }
     }
 
     private fun verifyDownloadedApk(file: File, asset: ApkAsset) {

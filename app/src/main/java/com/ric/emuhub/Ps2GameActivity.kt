@@ -353,6 +353,23 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         }
         panel.addView(resolutionButton)
 
+        val displayButton = Button(this).apply {
+            text = "Screen: ${Ps2DisplaySettings.label(this@Ps2GameActivity)}"
+            isAllCaps = false
+            setOnClickListener {
+                val labels = Ps2DisplaySettings.MODES.keys.toTypedArray()
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("Screen Size / Aspect").setItems(labels) { d, which ->
+                    val value = Ps2DisplaySettings.MODES.getValue(labels[which])
+                    Ps2DisplaySettings.save(this@Ps2GameActivity, value)
+                    runCatching { NativeApp.setSetting("EmuCore/GS", "AspectRatio", "string", value) }
+                    runCatching { NativeApp.commitSettings() }
+                    text = "Screen: ${labels[which]}"
+                    d.dismiss()
+                }.show()
+            }
+        }
+        panel.addView(displayButton)
+
         val eeButton = Button(this).apply {
             text = "EE Cycle Rate: ${activeProfile.eeRate}"
             isAllCaps = false
@@ -474,6 +491,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             runCatching { NativeApp.setAffinityMode(activeProfile.affinity) }
             runCatching { NativeApp.renderVulkan() }
             runCatching { NativeApp.renderUpscalemultiplier(activeProfile.upscale) }
+            runCatching { NativeApp.setSetting("EmuCore/GS", "AspectRatio", "string", Ps2DisplaySettings.load(this)) }
             if (Build.VERSION.SDK_INT >= 33) runCatching { NativeApp.setAdpfEnabled(true) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "vuThread", "bool", activeProfile.mtvu.toString()) }
             runCatching { NativeApp.setSetting("EmuCore/Speedhacks", "WaitLoop", "bool", "true") }
