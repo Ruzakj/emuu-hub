@@ -1,1 +1,2 @@
 PS2 Quick Tune scrollable menu: Cycle Skip, MTVU, per-game save/reset visible.
+Final source also includes full-screen display modes, PS2 CHD routing, and direct HTTPS in-app update download with progress/checksum.
