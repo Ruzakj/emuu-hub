@@ -1,44 +1,49 @@
 name: Patch PS2 Quick Tune Scroll
+
 on:
   push:
-    branches: [main]
-    paths: ['.github/workflows/patch-ps2-quick-tune-scroll.yml']
+    branches:
+      - main
+    paths:
+      - .github/workflows/patch-ps2-quick-tune-scroll.yml
+
 permissions:
   contents: write
+
 jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Make quick tune scrollable
-        shell: python
         run: |
+          python3 <<'PY'
           from pathlib import Path
-          p=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
-          s=p.read_text()
+          p = Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s = p.read_text()
           if 'import android.widget.ScrollView\n' not in s:
-              s=s.replace('import android.widget.SeekBar\n', 'import android.widget.SeekBar\nimport android.widget.ScrollView\n')
-          old='''        AlertDialog.Builder(this)
-            .setTitle("PS2 QUICK TUNE • ${File(romPath).name}")
-            .setView(panel)
-            .setPositiveButton("DONE", null)
-'''
-          new='''        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(panel, ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ))
-        }
-        AlertDialog.Builder(this)
-            .setTitle("PS2 QUICK TUNE • ${File(romPath).nameWithoutExtension}")
-            .setView(scroll)
-            .setPositiveButton("DONE", null)
-'''
+              s = s.replace('import android.widget.SeekBar\n', 'import android.widget.SeekBar\nimport android.widget.ScrollView\n')
+          old = '''        AlertDialog.Builder(this)
+              .setTitle("PS2 QUICK TUNE • ${File(romPath).name}")
+              .setView(panel)
+              .setPositiveButton("DONE", null)
+          '''
+          new = '''        val scroll = ScrollView(this).apply {
+              isFillViewport = true
+              addView(panel, ScrollView.LayoutParams(
+                  ViewGroup.LayoutParams.MATCH_PARENT,
+                  ViewGroup.LayoutParams.WRAP_CONTENT
+              ))
+          }
+          AlertDialog.Builder(this)
+              .setTitle("PS2 QUICK TUNE • ${File(romPath).nameWithoutExtension}")
+              .setView(scroll)
+              .setPositiveButton("DONE", null)
+          '''
           if old not in s:
               raise SystemExit('Quick Tune dialog pattern not found')
-          s=s.replace(old,new)
-          p.write_text(s)
+          p.write_text(s.replace(old, new))
+          PY
       - name: Verify Cycle Skip remains present
         run: |
           grep -q 'EE Cycle Skip' app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
