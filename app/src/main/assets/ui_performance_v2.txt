@@ -1,2 +1,3 @@
 Lightweight library render limit, smaller cover cache, optimized recent lookup, cleaner local game titles.
 Runtime verification: direct in-app streaming update, PS2 fullscreen/aspect controls, PS2 CHD direct routing.
+Release verification: retry-safe GitHub publication for in-app updater.
