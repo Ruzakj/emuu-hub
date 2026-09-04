@@ -19,30 +19,29 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
           p = Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
           s = p.read_text()
           if 'import android.widget.ScrollView\n' not in s:
               s = s.replace('import android.widget.SeekBar\n', 'import android.widget.SeekBar\nimport android.widget.ScrollView\n')
-          old = '''        AlertDialog.Builder(this)
-              .setTitle("PS2 QUICK TUNE • ${File(romPath).name}")
-              .setView(panel)
-              .setPositiveButton("DONE", null)
-          '''
-          new = '''        val scroll = ScrollView(this).apply {
-              isFillViewport = true
-              addView(panel, ScrollView.LayoutParams(
-                  ViewGroup.LayoutParams.MATCH_PARENT,
-                  ViewGroup.LayoutParams.WRAP_CONTENT
-              ))
-          }
-          AlertDialog.Builder(this)
-              .setTitle("PS2 QUICK TUNE • ${File(romPath).nameWithoutExtension}")
-              .setView(scroll)
-              .setPositiveButton("DONE", null)
-          '''
-          if old not in s:
+          pattern = re.compile(r'(?m)^(\s*)AlertDialog\.Builder\(this\)\n\s*\.setTitle\("PS2 QUICK TUNE • \$\{File\(romPath\)\.name\}"\)\n\s*\.setView\(panel\)\n\s*\.setPositiveButton\("DONE", null\)')
+          m = pattern.search(s)
+          if not m:
               raise SystemExit('Quick Tune dialog pattern not found')
-          p.write_text(s.replace(old, new))
+          indent = m.group(1)
+          replacement = f'''{indent}val scroll = ScrollView(this).apply {{
+{indent}    isFillViewport = true
+{indent}    addView(panel, ScrollView.LayoutParams(
+{indent}        ViewGroup.LayoutParams.MATCH_PARENT,
+{indent}        ViewGroup.LayoutParams.WRAP_CONTENT
+{indent}    ))
+{indent}}}
+{indent}AlertDialog.Builder(this)
+{indent}    .setTitle("PS2 QUICK TUNE • ${{File(romPath).nameWithoutExtension}}")
+{indent}    .setView(scroll)
+{indent}    .setPositiveButton("DONE", null)'''
+          s = pattern.sub(replacement, s, count=1)
+          p.write_text(s)
           PY
       - name: Verify Cycle Skip remains present
         run: |
