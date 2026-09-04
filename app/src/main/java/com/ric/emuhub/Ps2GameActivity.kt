@@ -442,7 +442,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
 
             isFillViewport = true
 
-            addView(panel, ScrollView.LayoutParams(
+            addView(panel, ViewGroup.LayoutParams(
 
                 ViewGroup.LayoutParams.MATCH_PARENT,
 
