@@ -1,0 +1,3 @@
+Force in-app update publication for latest Dolphin manual per-game tuning controls.
+Target commit: a05687c1519210ab66be6f2362dfc475782d5a66
+Triggered: 2026-09-06 Asia/Jakarta
