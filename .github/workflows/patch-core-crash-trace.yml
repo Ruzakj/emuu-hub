@@ -1,0 +1,94 @@
+name: Patch Core Crash Trace
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-core-crash-trace.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch native and Kotlin crash tracing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # NativeBridge: expose a persistent native log path.
+          p=Path('app/src/main/java/com/ric/emuhub/core/NativeBridge.kt')
+          s=p.read_text()
+          if 'external fun setLogPath' not in s:
+              s=s.replace('    external fun init(corePath: String, systemDir: String, saveDir: String): Boolean\n',
+                          '    external fun setLogPath(path: String)\n    external fun init(corePath: String, systemDir: String, saveDir: String): Boolean\n')
+          p.write_text(s)
+
+          # Native host: persistent stage log + correctly detect Dolphin.
+          p=Path('app/src/main/cpp/emuhost.cpp')
+          s=p.read_text()
+          if '#include <ctime>' not in s:
+              s=s.replace('#include <cstdarg>\n', '#include <cstdarg>\n#include <ctime>\n')
+          if 'static std::string runtimeLogPath;' not in s:
+              s=s.replace('static bool shutdownRequested=false;\n', 'static bool shutdownRequested=false;\nstatic std::string runtimeLogPath;\n\nstatic void traceLine(const char* msg){\n    LOGE("TRACE %s",msg?msg:"(null)");\n    if(runtimeLogPath.empty())return;\n    std::ofstream o(runtimeLogPath,std::ios::app);\n    if(!o)return;\n    std::time_t now=std::time(nullptr);\n    o << (long long)now << " " << (msg?msg:"(null)") << "\\n";\n    o.flush();\n}\n')
+          if 'Java_com_ric_emuhub_core_NativeBridge_setLogPath' not in s:
+              marker='extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init'
+              fn='extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setLogPath(JNIEnv*e,jobject,jstring path){ const char*p=e->GetStringUTFChars(path,nullptr); runtimeLogPath=p?p:""; e->ReleaseStringUTFChars(path,p); if(!runtimeLogPath.empty()){ std::ofstream o(runtimeLogPath,std::ios::trunc); if(o){o<<"EMU HUB CORE TRACE\\n";o.flush();} } }\n\n'
+              s=s.replace(marker,fn+marker)
+          old='isPpsspp=std::strstr(cp,"ppsspp")!=nullptr;const bool wantsAnalog=std::strstr(cp,"pcsx")!=nullptr;systemDir=sp;saveDir=sv;core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);'
+          new='isPpsspp=std::strstr(cp,"ppsspp")!=nullptr;isDolphin=std::strstr(cp,"dolphin")!=nullptr;const bool wantsAnalog=std::strstr(cp,"pcsx")!=nullptr||isDolphin;systemDir=sp;saveDir=sv;traceLine(isDolphin?"init: dolphin detected":"init: non-dolphin core");traceLine("init: before dlopen");core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);'
+          if old in s:
+              s=s.replace(old,new)
+          s=s.replace('if(!core){LOGE("dlopen: %s",dlerror());return JNI_FALSE;}', 'if(!core){LOGE("dlopen: %s",dlerror());traceLine("init: dlopen failed");return JNI_FALSE;}traceLine("init: dlopen ok");')
+          s=s.replace('    p_retro_init();\n', '    traceLine("init: before retro_init");\n    p_retro_init();\n    traceLine("init: retro_init ok");\n')
+          s=s.replace('    LOGI("Core initialized: ppsspp=%d hw=%d reset=%d",isPpsspp?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;\n', '    traceLine("init: complete");\n    LOGI("Core initialized: ppsspp=%d dolphin=%d hw=%d reset=%d",isPpsspp?1:0,isDolphin?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;\n')
+          s=s.replace('    const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};bool ok=p_retro_load_game&&p_retro_load_game(&info);e->ReleaseStringUTFChars(path,p);', '    traceLine("loadGame: enter");const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};traceLine("loadGame: before retro_load_game");bool ok=p_retro_load_game&&p_retro_load_game(&info);traceLine(ok?"loadGame: retro_load_game ok":"loadGame: retro_load_game failed");e->ReleaseStringUTFChars(path,p);')
+          s=s.replace('    p_retro_run();if(shutdownRequested)return -2;', '    static bool firstRun=true;if(firstRun){traceLine("runFrame: before first retro_run");}p_retro_run();if(firstRun){traceLine("runFrame: first retro_run ok");firstRun=false;}if(shutdownRequested)return -2;')
+          p.write_text(s)
+
+          # GameActivity: Java-side stage trace and persistent path.
+          p=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          s=p.read_text()
+          if 'private lateinit var coreTraceFile: File' not in s:
+              s=s.replace('    private var cleanedUp = false\n', '    private var cleanedUp = false\n    private lateinit var coreTraceFile: File\n    private val coreTracePrefs by lazy { getSharedPreferences("core_runtime_trace", MODE_PRIVATE) }\n')
+          anchor='        val systemRoot = StoragePaths.systemDir(this)\n'
+          if 'coreTraceFile = File(StoragePaths.root(this), "CORE/core-runtime.log")' not in s:
+              s=s.replace(anchor, anchor+'        coreTraceFile = File(StoragePaths.root(this), "CORE/core-runtime.log").apply { parentFile?.mkdirs() }\n        NativeBridge.setLogPath(coreTraceFile.absolutePath)\n        traceCoreStage("prepare", coreId, romName)\n')
+          s=s.replace('        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { showLoadError("$coreLabel core gagal inisialisasi."); return }', '        traceCoreStage("native_init", coreId, romName)\n        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("native_init_ok", coreId, romName)')
+          s=s.replace('        if (!NativeBridge.loadGame(rom)) { showLoadError("$coreLabel gagal memuat ${File(rom).name}."); return }', '        traceCoreStage("load_game", coreId, romName)\n        if (!NativeBridge.loadGame(rom)) { traceCoreStage("load_game_failed", coreId, romName, false); showLoadError("$coreLabel gagal memuat ${File(rom).name}. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("load_game_ok", coreId, romName)')
+          if 'private fun traceCoreStage(' not in s:
+              marker='    private fun resolveGameProfile(coreId:String,romName:String):GameProfile{'
+              fn='    private fun traceCoreStage(stage:String,coreId:String,romName:String,active:Boolean=true){\n        coreTracePrefs.edit().putBoolean("active",active).putString("stage",stage).putString("core",coreId).putString("game",romName).putLong("time",System.currentTimeMillis()).commit()\n        runCatching { coreTraceFile.parentFile?.mkdirs(); coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} stage=$stage core=$coreId game=$romName\\n") }\n    }\n\n'
+              s=s.replace(marker,fn+marker)
+          s=s.replace('    private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload() }', '    private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload(); if(::coreTraceFile.isInitialized) coreTracePrefs.edit().putBoolean("active",false).putString("stage","clean_exit").apply() }')
+          p.write_text(s)
+
+          # EmuHubApp: recover previous native crash stage on next launch.
+          p=Path('app/src/main/java/com/ric/emuhub/EmuHubApp.kt')
+          s=p.read_text()
+          if 'core_runtime_trace' not in s:
+              needle='        installJ2meCrashHandler()\n'
+              block='        val coreTrace = getSharedPreferences("core_runtime_trace", MODE_PRIVATE)\n        if (coreTrace.getBoolean("active", false) && isMainProcess) {\n            val stage = coreTrace.getString("stage", "unknown") ?: "unknown"\n            val coreId = coreTrace.getString("core", "unknown") ?: "unknown"\n            val game = coreTrace.getString("game", "unknown") ?: "unknown"\n            coreTrace.edit().putBoolean("active", false).putString("last_crash_stage", stage).apply()\n            Toast.makeText(this, "Core crash: $coreId • $stage • $game. Log: emu-hub/CORE/core-runtime.log", Toast.LENGTH_LONG).show()\n        }\n\n'
+              s=s.replace(needle,block+needle)
+          p.write_text(s)
+          PY
+
+      - name: Validate patch
+        run: |
+          grep -q 'external fun setLogPath' app/src/main/java/com/ric/emuhub/core/NativeBridge.kt
+          grep -q 'isDolphin=std::strstr(cp,"dolphin")' app/src/main/cpp/emuhost.cpp
+          grep -q 'runFrame: before first retro_run' app/src/main/cpp/emuhost.cpp
+          grep -q 'CORE/core-runtime.log' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'core_runtime_trace' app/src/main/java/com/ric/emuhub/EmuHubApp.kt
+
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp app/src/main/java/com/ric/emuhub/core/NativeBridge.kt app/src/main/java/com/ric/emuhub/GameActivity.kt app/src/main/java/com/ric/emuhub/EmuHubApp.kt
+          git diff --cached --quiet || git commit -m "Add persistent core crash tracing"
+          git push
