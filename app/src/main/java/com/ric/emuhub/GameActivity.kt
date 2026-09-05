@@ -121,7 +121,7 @@ class GameActivity : Activity() {
         if(marker.exists())return
         target.mkdirs()
         copyAssetTree("Dolphin/Sys",target)
-        if(File(target,"GC/font_ansi.bin").isFile) runCatching{marker.writeText("1")}
+        if(File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile) runCatching{marker.writeText("1")}
     }
 
     private fun installPpssppAssets(root:File){
