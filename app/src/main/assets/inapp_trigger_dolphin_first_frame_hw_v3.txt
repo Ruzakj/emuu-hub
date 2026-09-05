@@ -1,0 +1,2 @@
+Trigger stable in-app release after Dolphin HW frontend first-frame hardening.
+Includes deferred context_reset, SET_HW_SHARED_CONTEXT acceptance, HW request tracing, post-load reset tracing, and first HW frame callback tracing.
