@@ -1,0 +1,101 @@
+name: Patch Embedded Dolphin Routing
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-internal-routing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch MainActivity for embedded Dolphin
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+
+          s=s.replace('"GAMECUBE","WII"->launchDolphin(target)', '"GAMECUBE","WII"->launchDolphin(uri,g.name,target)')
+          s=s.replace('ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->launchDolphin(if(ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE")', 'ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->launchDolphin(uri,name,if(ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE")')
+
+          old='private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}'
+          new='private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube • Dolphin Official","Wii • Dolphin Official")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);3->launchDolphin(uri,name,"GAMECUBE");else->launchDolphin(uri,name,"WII")}}.setNegativeButton("Batal",null).show()}'
+          if old not in s: raise SystemExit('ISO chooser anchor not found')
+          s=s.replace(old,new,1)
+
+          old2='''    private fun launchDolphin(system:String){
+        val platform=if(system=="WII")"wii" else "gamecube"
+        val deep=Intent(Intent.ACTION_VIEW,Uri.parse("dolphinemu://app/browse/$platform")).apply{setPackage(DOLPHIN_PACKAGE)}
+        try{
+            startActivity(deep)
+            status.text="$system • Dolphin"
+        }catch(_:Exception){
+            AlertDialog.Builder(this).setTitle("Dolphin Emulator diperlukan").setMessage("GameCube dan Wii menggunakan Dolphin resmi. Install Dolphin sekali, lalu Emu Hub akan membuka library Dolphin dari game shelf.").setPositiveButton("DOWNLOAD DOLPHIN"){_,_->
+                runCatching{startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://dolphin-emu.org/download/")))}
+            }.setNegativeButton("Batal",null).show()
+        }
+    }
+'''
+          new2='''    private fun launchDolphin(uri:Uri,name:String,system:String){
+        try{
+            val launchPath=if(uri.scheme=="file") uri.path ?: uri.toString() else uri.toString()
+            val intent=Intent(this,org.dolphinemu.dolphinemu.activities.EmulationActivity::class.java)
+                .putExtra(org.dolphinemu.dolphinemu.activities.EmulationActivity.EXTRA_SELECTED_GAMES,arrayOf(launchPath))
+                .putExtra(org.dolphinemu.dolphinemu.activities.EmulationActivity.EXTRA_RIIVOLUTION,false)
+            startActivity(intent)
+            status.text="$system • Dolphin Official • $name"
+        }catch(e:Exception){
+            status.text="$system • Dolphin launch failed"
+            Toast.makeText(this,"Dolphin internal gagal membuka game: ${e.message}",Toast.LENGTH_LONG).show()
+        }
+    }
+'''
+          if old2 not in s: raise SystemExit('old launchDolphin block not found')
+          s=s.replace(old2,new2,1)
+
+          old3='''        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->
+            when(which){
+                0->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
+                1->showExtractedPspResolutionChooser(session,rom)
+                else->launchExtractedPs2OrSetup(session,rom)
+            }
+        }.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
+'''
+          new3='''        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube • Dolphin Official","Wii • Dolphin Official")){_,which->
+            when(which){
+                0->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
+                1->showExtractedPspResolutionChooser(session,rom)
+                2->launchExtractedPs2OrSetup(session,rom)
+                3->{pendingArchiveSession=session.root;launchDolphin(Uri.fromFile(rom.file),rom.displayName,"GAMECUBE")}
+                else->{pendingArchiveSession=session.root;launchDolphin(Uri.fromFile(rom.file),rom.displayName,"WII")}
+            }
+        }.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
+'''
+          if old3 not in s: raise SystemExit('extracted ISO chooser anchor not found')
+          s=s.replace(old3,new3,1)
+
+          # Dolphin formats from archives should launch the embedded engine instead of a libretro fallback.
+          s=s.replace('''            "ecm"->decodeExtractedEcm(session,rom)
+            else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)
+''','''            "ecm"->decodeExtractedEcm(session,rom)
+            "gcm","rvz","wbfs","wia","wad","dol"->{pendingArchiveSession=session.root;launchDolphin(Uri.fromFile(rom.file),rom.displayName,if(rom.ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE")}
+            else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)
+''',1)
+
+          p.write_text(s)
+          PY
+      - name: Commit routing patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Use embedded official Dolphin for GameCube and Wii"
+          git push
