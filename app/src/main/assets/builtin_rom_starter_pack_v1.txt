@@ -1,0 +1,15 @@
+Emu Hub built-in legal homebrew starter pack v1
+
+NES
+- Galaxy Patrol
+
+GBA
+- Rkanoid Modern
+- Rkanoid Demo
+
+SNES
+- Gothicvania
+- Hello World Region
+
+ROMs are staged by the Android build workflow from their original permissively licensed sources. BuiltinRomManager copies them to app-private storage on first launch and merges them into the Unified Library cache.
+No commercial ROMs are bundled.
