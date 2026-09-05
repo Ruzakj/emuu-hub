@@ -1,0 +1,2 @@
+Trigger stable in-app update after Dolphin/libretro integration audit fixes.
+Created: 2026-09-05 12:05 Asia/Jakarta
