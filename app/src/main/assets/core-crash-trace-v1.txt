@@ -1,0 +1,2 @@
+Emu Hub core crash trace v1
+Includes persistent frontend/native stage diagnostics for libretro cores.
