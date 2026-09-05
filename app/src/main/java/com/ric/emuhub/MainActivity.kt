@@ -51,7 +51,6 @@ class MainActivity : Activity() {
         private val SWITCH = setOf("xci","nsp","nro")
         private val ARCHIVES = ArchiveHelper.ARCHIVE_EXTENSIONS
         private val RECOGNIZED = INTERNAL + SWITCH + ARCHIVES
-        private const val DOLPHIN_PACKAGE = "org.dolphinemu.dolphinemu"
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
         private val PSP_RES_VALUES = arrayOf("480x272","960x544")
         private val PSP_RES_LABELS = arrayOf("1× • 480×272 • Performance","2× • 960×544 • Recommended")
@@ -185,7 +184,7 @@ class MainActivity : Activity() {
     private fun buildConsoleStrip():View{
         val hsv=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER;clipToPadding=false}
         val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        val consoles=listOf(arrayOf("PSP","PPSSPP","P"),arrayOf("PS1","PCSX","1"),arrayOf("PS2","ARMSX2","2"),arrayOf("GAMECUBE","Dolphin","C"),arrayOf("WII","Dolphin","W"),arrayOf("GBA","mGBA","G"),arrayOf("NES","FCEUmm","N"),arrayOf("SNES","Snes9x","S"),arrayOf("JAVA","JL-Mod","J"),arrayOf("SWITCH","Eden","▰"))
+        val consoles=listOf(arrayOf("PSP","PPSSPP","P"),arrayOf("PS1","PCSX","1"),arrayOf("PS2","ARMSX2","2"),arrayOf("GAMECUBE","Dolphin Core","C"),arrayOf("WII","Dolphin Core","W"),arrayOf("GBA","mGBA","G"),arrayOf("NES","FCEUmm","N"),arrayOf("SNES","Snes9x","S"),arrayOf("JAVA","JL-Mod","J"),arrayOf("SWITCH","Eden","▰"))
         consoles.forEachIndexed{index,item->
             val count=if(item[0]=="JAVA") null else allLibraryGames.count{inferredConsole(it)==item[0]}
             val chip=LinearLayout(this).apply{
@@ -535,7 +534,7 @@ class MainActivity : Activity() {
             "PSP"->{writePspResolution(prefs.getString(KEY_PSP_RESOLUTION,"960x544")?:"960x544");copyAndLaunchInternal(uri,g.name,g.ext,"ppsspp")}
             "PS1"->copyAndLaunchInternal(uri,g.name,g.ext,"pcsx")
             "PS2"->launchPs2OrSetup(uri,g.name)
-            "GAMECUBE","WII"->launchDolphin(target)
+            "GAMECUBE","WII"->copyAndLaunchInternal(uri,g.name,g.ext,"dolphin")
             "GBA","NES","SNES"->copyAndLaunchInternal(uri,g.name,g.ext,null)
             "SWITCH"->launchEden(uri)
             "ARCHIVE"->openArchive(uri,g.name)
@@ -551,8 +550,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->launchDolphin(if(ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE");ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
-    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}
+    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->copyAndLaunchInternal(uri,name,ext,"dolphin");ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
+    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • Dolphin Core")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);else->copyAndLaunchInternal(uri,name,"iso","dolphin")}}.setNegativeButton("Batal",null).show()}
     private fun showChdChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"chd","pcsx") else launchPs2OrSetup(uri,name)}.setNegativeButton("Batal",null).show()}
 
     private fun launchPs2OrSetup(uri:Uri,name:String){
@@ -697,18 +696,6 @@ class MainActivity : Activity() {
         startActivityForResult(Intent(this,GameActivity::class.java).putExtra("romPath",file.absolutePath).putExtra("coreId",core).putExtra("romName",name),REQUEST_ARCHIVE_GAME)
     }
 
-    private fun launchDolphin(system:String){
-        val platform=if(system=="WII")"wii" else "gamecube"
-        val deep=Intent(Intent.ACTION_VIEW,Uri.parse("dolphinemu://app/browse/$platform")).apply{setPackage(DOLPHIN_PACKAGE)}
-        try{
-            startActivity(deep)
-            status.text="$system • Dolphin"
-        }catch(_:Exception){
-            AlertDialog.Builder(this).setTitle("Dolphin Emulator diperlukan").setMessage("GameCube dan Wii menggunakan Dolphin resmi. Install Dolphin sekali, lalu Emu Hub akan membuka library Dolphin dari game shelf.").setPositiveButton("DOWNLOAD DOLPHIN"){_,_->
-                runCatching{startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://dolphin-emu.org/download/")))}
-            }.setNegativeButton("Batal",null).show()
-        }
-    }
 
     private fun launchEden(uri:Uri){
         val pkg=EDEN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{Toast.makeText(this,"Eden / Eden Optimized tidak terdeteksi.",Toast.LENGTH_LONG).show();return}

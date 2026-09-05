@@ -79,6 +79,7 @@ static std::vector<int16_t> audioBuffer;
 static bool buttons[16]={};
 static int16_t analogX=0,analogY=0;
 static bool isPpsspp=false;
+static bool isDolphin=false;
 static bool shutdownRequested=false;
 
 static EGLDisplay eglDisplay=EGL_NO_DISPLAY;
@@ -164,6 +165,25 @@ static bool createHw(retro_hw_render_callback* cb){
     return true;
 }
 
+static const char* dolphinOption(const char* key){
+    if(!key)return nullptr;
+    if(std::strcmp(key,"dolphin_cpu_core")==0)return "JITARM64";
+    if(std::strcmp(key,"dolphin_cpu_clock_rate")==0)return "100%";
+    if(std::strcmp(key,"dolphin_fastmem")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_dsp_hle")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_dsp_jit")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_emulation_speed")==0)return "100%";
+    if(std::strcmp(key,"dolphin_widescreen")==0)return "disabled";
+    if(std::strcmp(key,"dolphin_progressive_scan")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_pal60")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_enable_rumble")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_wiimote_continuous_scanning")==0)return "disabled";
+    if(std::strcmp(key,"dolphin_cheats_enabled")==0)return "disabled";
+    if(std::strcmp(key,"dolphin_osd_enabled")==0)return "enabled";
+    if(std::strcmp(key,"dolphin_log_level")==0)return "Error";
+    return nullptr;
+}
+
 static const char* ppssppOption(const char* key){
     if(!key)return nullptr;
     if(std::strcmp(key,"ppsspp_backend")==0)return "opengl";
@@ -192,7 +212,7 @@ static bool envCb(unsigned cmd,void* data){
         case ENV_GET_SAVE_DIRECTORY:*reinterpret_cast<const char**>(data)=saveDir.c_str();return true;
         case ENV_SET_PIXEL_FORMAT:pixelFormat=*reinterpret_cast<const int*>(data);return true;
         case ENV_GET_VARIABLE_UPDATE:*reinterpret_cast<bool*>(data)=false;return true;
-        case ENV_GET_VARIABLE:{auto*v=reinterpret_cast<retro_variable*>(data);if(!v)return false;v->value=isPpsspp?ppssppOption(v->key):nullptr;if(v->value){LOGI("Core option %s=%s",v->key,v->value);return true;}return false;}
+        case ENV_GET_VARIABLE:{auto*v=reinterpret_cast<retro_variable*>(data);if(!v)return false;v->value=isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr);if(v->value){LOGI("Core option %s=%s",v->key,v->value);return true;}return false;}
         case ENV_GET_LOG_INTERFACE:{auto*l=reinterpret_cast<retro_log_callback*>(data);l->log=coreLog;return true;}
         case ENV_GET_LANGUAGE:*reinterpret_cast<unsigned*>(data)=0;return true;
         case ENV_GET_INPUT_BITMASKS:return true;
@@ -273,4 +293,4 @@ extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudi
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_saveState(JNIEnv*e,jobject,jstring path){if(!p_retro_serialize_size||!p_retro_serialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();size_t z=p_retro_serialize_size();if(!z)return JNI_FALSE;std::vector<uint8_t>s(z);if(!p_retro_serialize(s.data(),z))return JNI_FALSE;const char*p=e->GetStringUTFChars(path,nullptr);std::ofstream o(p,std::ios::binary|std::ios::trunc);e->ReleaseStringUTFChars(path,p);if(!o)return JNI_FALSE;o.write((const char*)s.data(),s.size());return o.good()?JNI_TRUE:JNI_FALSE;}
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadState(JNIEnv*e,jobject,jstring path){if(!p_retro_unserialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();const char*p=e->GetStringUTFChars(path,nullptr);std::ifstream in(p,std::ios::binary|std::ios::ate);e->ReleaseStringUTFChars(path,p);if(!in)return JNI_FALSE;auto z=in.tellg();if(z<=0)return JNI_FALSE;in.seekg(0);std::vector<uint8_t>s((size_t)z);if(!in.read((char*)s.data(),z))return JNI_FALSE;audioBuffer.clear();return p_retro_unserialize(s.data(),s.size())?JNI_TRUE:JNI_FALSE;}
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setButton(JNIEnv*,jobject,jint id,jboolean p){if(id>=0&&id<16)buttons[id]=p;}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setAnalog(JNIEnv*,jobject,jint x,jint y){analogX=(int16_t)std::max(-32767,std::min(32767,(int)x));analogY=(int16_t)std::max(-32767,std::min(32767,(int)y));}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_reset(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_reset)p_retro_reset();}
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_unload_game)p_retro_unload_game();destroyHw();if(p_retro_deinit)p_retro_deinit();if(core)dlclose(core);core=nullptr;isPpsspp=false;shutdownRequested=false;frame.clear();rgbaScratch.clear();audioBuffer.clear();std::fill(std::begin(buttons),std::end(buttons),false);analogX=analogY=0;p_retro_set_controller_port_device=nullptr;}
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_unload_game)p_retro_unload_game();destroyHw();if(p_retro_deinit)p_retro_deinit();if(core)dlclose(core);core=nullptr;isPpsspp=false;isDolphin=false;shutdownRequested=false;frame.clear();rgbaScratch.clear();audioBuffer.clear();std::fill(std::begin(buttons),std::end(buttons),false);analogX=analogY=0;p_retro_set_controller_port_device=nullptr;}

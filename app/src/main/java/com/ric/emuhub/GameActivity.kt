@@ -44,9 +44,9 @@ class GameActivity : Activity() {
         val romName = intent.getStringExtra("romName") ?: File(rom).name
         gameProfile = resolveGameProfile(coreId, romName)
         val coreFile = when (coreId) {
-            "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; else -> "libmgba_core.so"
+            "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; "dolphin" -> "libdolphin_core.so"; else -> "libmgba_core.so"
         }
-        val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; else -> "mGBA" }
+        val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; "dolphin" -> "Dolphin Core"; else -> "mGBA" }
         val systemRoot = StoragePaths.systemDir(this)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
         val saveDir = StoragePaths.savesDir(this)
@@ -75,6 +75,7 @@ class GameActivity : Activity() {
             coreId=="pcsx" && ("final fantasy ix" in n || "final fantasy 9" in n || "ff9" in n) -> GameProfile("ps1-rpg","Z9x PS1 RPG",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="ppsspp" -> GameProfile("psp-balanced","Z9x PSP Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             else -> GameProfile("classic","Classic",3,Process.THREAD_PRIORITY_DISPLAY,true)
         }
     }
@@ -102,10 +103,10 @@ class GameActivity : Activity() {
         overlay.addView(gameButton("L",10,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.START).apply{leftMargin=dp(28);topMargin=dp(58)})
         overlay.addView(gameButton("R",11,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.END).apply{rightMargin=dp(28);topMargin=dp(58)})
         if(coreId=="pcsx"){overlay.addView(gameButton("L2",12,52),FrameLayout.LayoutParams(dp(52),dp(38),Gravity.TOP or Gravity.START).apply{leftMargin=dp(106);topMargin=dp(60)});overlay.addView(gameButton("R2",13,52),FrameLayout.LayoutParams(dp(52),dp(38),Gravity.TOP or Gravity.END).apply{rightMargin=dp(106);topMargin=dp(60)})}
-        if(coreId=="pcsx"||coreId=="ppsspp")overlay.addView(AnalogStickView(),FrameLayout.LayoutParams(dp(150),dp(150),Gravity.BOTTOM or Gravity.START).apply{leftMargin=dp(30);bottomMargin=dp(20)})
-        overlay.addView(DPadView(),FrameLayout.LayoutParams(dp(138),dp(138),Gravity.BOTTOM or Gravity.START).apply{leftMargin=if(coreId=="pcsx"||coreId=="ppsspp")dp(188) else dp(42);bottomMargin=dp(26)})
+        if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")overlay.addView(AnalogStickView(),FrameLayout.LayoutParams(dp(150),dp(150),Gravity.BOTTOM or Gravity.START).apply{leftMargin=dp(30);bottomMargin=dp(20)})
+        overlay.addView(DPadView(),FrameLayout.LayoutParams(dp(138),dp(138),Gravity.BOTTOM or Gravity.START).apply{leftMargin=if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")dp(188) else dp(42);bottomMargin=dp(26)})
         val face=FrameLayout(this);fun addFace(label:String,id:Int,x:Int,y:Int){face.addView(gameButton(label,id,58),FrameLayout.LayoutParams(dp(58),dp(58),Gravity.TOP or Gravity.START).apply{leftMargin=dp(x);topMargin=dp(y)})}
-        when(coreId){"pcsx","ppsspp"->{addFace("△",9,60,0);addFace("○",8,120,60);addFace("×",0,60,120);addFace("□",1,0,60)};"snes9x"->{addFace("X",9,60,0);addFace("A",8,120,60);addFace("B",0,60,120);addFace("Y",1,0,60)};else->{addFace("A",8,105,45);addFace("B",0,35,90)}}
+        when(coreId){"pcsx","ppsspp","dolphin"->{addFace("△",9,60,0);addFace("○",8,120,60);addFace("×",0,60,120);addFace("□",1,0,60)};"snes9x"->{addFace("X",9,60,0);addFace("A",8,120,60);addFace("B",0,60,120);addFace("Y",1,0,60)};else->{addFace("A",8,105,45);addFace("B",0,35,90)}}
         overlay.addView(face,FrameLayout.LayoutParams(dp(178),dp(178),Gravity.BOTTOM or Gravity.END).apply{rightMargin=dp(28);bottomMargin=dp(18)})
         val center=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};center.addView(gameButton("SELECT",2,64),LinearLayout.LayoutParams(dp(72),dp(38)).apply{marginEnd=dp(10)});center.addView(gameButton("START",3,64),LinearLayout.LayoutParams(dp(72),dp(38)));overlay.addView(center,FrameLayout.LayoutParams(-2,dp(44),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply{bottomMargin=dp(20)});return overlay
     }
