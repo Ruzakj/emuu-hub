@@ -1,0 +1,2 @@
+Built-in ROM runtime extraction/indexing fix enabled.
+MainActivity copies legal starter ROM assets to filesDir/builtin-roms and merges them into the Unified Library even when no user ROM folder is selected.
