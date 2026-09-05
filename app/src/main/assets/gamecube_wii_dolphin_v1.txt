@@ -1,0 +1,5 @@
+GameCube/Wii support v1
+
+Emu Hub recognizes GameCube/Wii formats and routes them to the official Dolphin Android application.
+Supported routing extensions: gcm, rvz, wbfs, wia, wad, dol, plus ISO by folder hint where available.
+Dolphin package: org.dolphinemu.dolphinemu
