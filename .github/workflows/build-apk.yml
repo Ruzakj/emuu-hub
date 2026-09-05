@@ -78,7 +78,7 @@ jobs:
           path: app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
           key: pcsx-rearmed-arm64-libretro-v1
 
-      - name: Download PCSX-ReARMed ARM64 core on cache miss
+      - name: Download PCSX-ReARMed core on cache miss
         if: steps.pcsx-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p app/src/main/jniLibs/arm64-v8a /tmp/pcsx
@@ -138,6 +138,61 @@ jobs:
             exit 1
           fi
 
+      - name: Stage small legal homebrew starter ROMs
+        run: |
+          set -euxo pipefail
+          ROOT=app/src/main/assets/builtin-roms
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
+
+          # NES: Galaxy Patrol (MIT, Riley Lannon)
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" \
+            -o "$ROOT/NES/Galaxy Patrol.nes"
+
+          # GBA: @rkanoid modern builds (MIT, Ben Orozco)
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" \
+            -o "$ROOT/GBA/Rkanoid Modern.gba"
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" \
+            -o "$ROOT/GBA/Rkanoid Demo.gba"
+
+          # SNES: original homebrew from donth77/snes-homebrew (MIT)
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" \
+            -o "$ROOT/SNES/Gothicvania.sfc"
+          curl --retry 3 --retry-delay 2 -fL \
+            "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" \
+            -o "$ROOT/SNES/Hello World Region.sfc"
+
+          cat > "$ROOT/NOTICE.txt" <<'EOF'
+          Emu Hub Built-in Homebrew Starter Pack
+
+          Only freely redistributable homebrew is bundled here. No commercial ROMs are included.
+
+          NES/Galaxy Patrol.nes
+          Source: https://github.com/rlannon/NES_GalaxyPatrol
+          License: MIT, Copyright (c) 2018 Riley Lannon
+
+          GBA/Rkanoid Modern.gba
+          GBA/Rkanoid Demo.gba
+          Source: https://github.com/benoror/gbadev
+          License: MIT for the modernized @rkanoid project/builds, Copyright (c) 2001-2026 Ben Orozco
+
+          SNES/Gothicvania.sfc
+          SNES/Hello World Region.sfc
+          Source: https://github.com/donth77/snes-homebrew
+          License: MIT, Copyright (c) 2026 Tom D
+          EOF
+
+          test -s "$ROOT/NES/Galaxy Patrol.nes"
+          test -s "$ROOT/GBA/Rkanoid Modern.gba"
+          test -s "$ROOT/GBA/Rkanoid Demo.gba"
+          test -s "$ROOT/SNES/Gothicvania.sfc"
+          test -s "$ROOT/SNES/Hello World Region.sfc"
+          du -ah "$ROOT" | sort -h
+
       - name: Verify emulator cores
         run: |
           test -s app/src/main/jniLibs/arm64-v8a/libmgba_core.so
@@ -155,13 +210,16 @@ jobs:
       - name: Build offline emulator APK
         run: gradle assembleDebug --build-cache --parallel --stacktrace
 
-      - name: Verify embedded engines
+      - name: Verify embedded engines and starter ROMs
         run: |
           APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)
           test -n "$APK"
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemuhost.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libppsspp_core.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
+          unzip -l "$APK" | grep 'assets/builtin-roms/NES/Galaxy Patrol.nes'
+          unzip -l "$APK" | grep 'assets/builtin-roms/GBA/Rkanoid Modern.gba'
+          unzip -l "$APK" | grep 'assets/builtin-roms/SNES/Gothicvania.sfc'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/liblibrashader_capi.so'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libppsspp_jni.so'
 
