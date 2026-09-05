@@ -54,28 +54,16 @@ jobs:
           test -n "$EMUHUB_KEYSTORE_PASSWORD" || { echo 'Missing EMUHUB_KEYSTORE_PASSWORD'; exit 1; }
           test -n "$EMUHUB_KEY_ALIAS" || { echo 'Missing EMUHUB_KEY_ALIAS'; exit 1; }
           test -n "$EMUHUB_KEY_PASSWORD" || { echo 'Missing EMUHUB_KEY_PASSWORD'; exit 1; }
-
           SOURCE_STORE=/tmp/emuhub-source.jks
           NORMALIZED_STORE=/tmp/emuhub-normalized.p12
           NORMALIZED_PASS='EmuHubNormalizedRelease2026!'
           echo "$KEYSTORE_B64" | base64 -d > "$SOURCE_STORE"
           keytool -list -keystore "$SOURCE_STORE" -storepass "$EMUHUB_KEYSTORE_PASSWORD" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
-
           normalize_with() {
             local keypass="$1"
             rm -f "$NORMALIZED_STORE"
-            keytool -importkeystore \
-              -srckeystore "$SOURCE_STORE" \
-              -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" \
-              -srcalias "$EMUHUB_KEY_ALIAS" \
-              -srckeypass "$keypass" \
-              -destkeystore "$NORMALIZED_STORE" \
-              -deststoretype PKCS12 \
-              -deststorepass "$NORMALIZED_PASS" \
-              -destkeypass "$NORMALIZED_PASS" \
-              -noprompt >/dev/null 2>&1
+            keytool -importkeystore -srckeystore "$SOURCE_STORE" -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" -srcalias "$EMUHUB_KEY_ALIAS" -srckeypass "$keypass" -destkeystore "$NORMALIZED_STORE" -deststoretype PKCS12 -deststorepass "$NORMALIZED_PASS" -destkeypass "$NORMALIZED_PASS" -noprompt >/dev/null 2>&1
           }
-
           if normalize_with "$EMUHUB_KEY_PASSWORD"; then
             echo 'Signing private key imported with configured key password.'
           elif normalize_with "$EMUHUB_KEYSTORE_PASSWORD"; then
@@ -84,12 +72,10 @@ jobs:
             echo 'Signing private key cannot be unlocked with the configured secrets.' >&2
             exit 1
           fi
-
           keytool -list -keystore "$NORMALIZED_STORE" -storetype PKCS12 -storepass "$NORMALIZED_PASS" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
           echo "EMUHUB_KEYSTORE_PATH=$NORMALIZED_STORE" >> "$GITHUB_ENV"
           echo "EMUHUB_KEYSTORE_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
           echo "EMUHUB_KEY_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
-          echo 'Normalized signing keystore ready for Gradle.'
 
       - name: Install Android toolchain
         run: |
@@ -137,6 +123,23 @@ jobs:
           cp -a /tmp/armsx2-runtime/assets/ARMSX2/. app/src/main/assets/ARMSX2/
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
 
+      - name: Stage small legal homebrew starter ROMs
+        run: |
+          set -euxo pipefail
+          ROOT=app/src/main/assets/builtin-roms
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" -o "$ROOT/NES/Galaxy Patrol.nes"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" -o "$ROOT/GBA/Rkanoid Modern.gba"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" -o "$ROOT/GBA/Rkanoid Demo.gba"
+          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"
+          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"
+          test -s "$ROOT/NES/Galaxy Patrol.nes"
+          test -s "$ROOT/GBA/Rkanoid Modern.gba"
+          test -s "$ROOT/GBA/Rkanoid Demo.gba"
+          test -s "$ROOT/SNES/Gothicvania.sfc"
+          test -s "$ROOT/SNES/Hello World Region.sfc"
+
       - name: Prepare thin app shell
         if: ${{ inputs.thin_shell }}
         shell: bash
@@ -160,6 +163,11 @@ jobs:
           test -n "$APK"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
+          unzip -l "$APK" | grep -F "assets/builtin-roms/NES/Galaxy Patrol.nes"
+          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Modern.gba"
+          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Demo.gba"
+          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Gothicvania.sfc"
+          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Hello World Region.sfc"
           mkdir -p dist
           cp "$APK" "dist/EmuHub-v${EMUHUB_VERSION_NAME}-arm64.apk"
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
@@ -173,41 +181,24 @@ jobs:
           TAG="v${EMUHUB_VERSION_CODE}"
           TITLE="Emu Hub ${EMUHUB_VERSION_NAME}"
           NOTES='${{ inputs.notes }}'
-
-          # Create metadata separately so a transient asset-upload failure is recoverable.
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             created=false
             for attempt in 1 2 3 4 5; do
-              echo "Create release $TAG attempt $attempt/5"
-              if gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES"; then
-                created=true
-                break
-              fi
-              # GitHub can return 5xx after actually creating the release. Re-check before retrying.
-              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                created=true
-                break
-              fi
+              if gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES"; then created=true; break; fi
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then created=true; break; fi
               sleep $((attempt * 4))
             done
-            $created || { echo "Could not create $TAG after retries" >&2; exit 1; }
+            $created || exit 1
           fi
-
-          # Upload/repair assets idempotently. --clobber makes retries safe.
           uploaded=false
           for attempt in 1 2 3 4 5; do
-            echo "Upload release assets attempt $attempt/5"
-            if gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then
-              uploaded=true
-              break
-            fi
+            if gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then uploaded=true; break; fi
             sleep $((attempt * 4))
           done
-          $uploaded || { echo "Could not upload release assets after retries" >&2; exit 1; }
-
+          $uploaded || exit 1
           ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-          echo "$ASSETS" | grep -qE '\.apk$' || { echo 'Published release has no APK asset' >&2; exit 1; }
-          echo "$ASSETS" | grep -qx 'SHA256SUMS.txt' || { echo 'Published release has no checksum asset' >&2; exit 1; }
+          echo "$ASSETS" | grep -qE '\.apk$'
+          echo "$ASSETS" | grep -qx 'SHA256SUMS.txt'
           echo "Release $TAG is complete and ready for the in-app updater."
 
       - uses: actions/upload-artifact@v4
