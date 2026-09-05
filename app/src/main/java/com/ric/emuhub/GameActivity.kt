@@ -25,6 +25,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
+import java.util.zip.ZipInputStream
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -141,17 +142,41 @@ class GameActivity : Activity() {
 
     private fun installDolphinAssets(root:File):Boolean{
         val target=File(root,"dolphin-emu/Sys")
-        val marker=File(target,".emuhub_dolphin_sys_v2")
+        val marker=File(target,".emuhub_dolphin_sys_zip_v3")
         val required={ File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile }
         if(marker.exists() && required()) return true
         return runCatching {
-            val packaged=assets.list("Dolphin/Sys") ?: emptyArray()
-            if(packaged.isEmpty()) return@runCatching false
+            traceCoreStage("dolphin_zip_open", "dolphin", intent.getStringExtra("romName") ?: "unknown")
             target.mkdirs()
-            copyAssetTree("Dolphin/Sys",target)
-            if(required()){ marker.writeText("2"); true } else false
+            assets.open("Dolphin/Sys.zip").use { raw ->
+                ZipInputStream(raw.buffered(1024*1024)).use { zip ->
+                    val canonicalRoot=target.canonicalFile
+                    var entry=zip.nextEntry
+                    var count=0
+                    val buffer=ByteArray(1024*1024)
+                    while(entry!=null){
+                        val outFile=File(target,entry.name).canonicalFile
+                        if(!outFile.path.startsWith(canonicalRoot.path + File.separator)) throw SecurityException("Invalid Dolphin zip entry: ${entry.name}")
+                        if(entry.isDirectory){
+                            outFile.mkdirs()
+                        }else{
+                            outFile.parentFile?.mkdirs()
+                            outFile.outputStream().buffered(1024*1024).use { out ->
+                                var n=zip.read(buffer)
+                                while(n>0){ out.write(buffer,0,n); n=zip.read(buffer) }
+                            }
+                        }
+                        zip.closeEntry()
+                        count++
+                        if(count%250==0) runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_entries=$count\n") }
+                        entry=zip.nextEntry
+                    }
+                    runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_complete entries=$count\n") }
+                }
+            }
+            if(required()){ marker.writeText("3"); true } else false
         }.getOrElse {
-            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_asset_exception=${it.javaClass.simpleName}:${it.message}\n") }
+            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_exception=${it.javaClass.simpleName}:${it.message}\n") }
             false
         }
     }
