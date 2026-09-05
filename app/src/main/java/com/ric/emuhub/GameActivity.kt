@@ -56,14 +56,27 @@ class GameActivity : Activity() {
         traceCoreStage("prepare", coreId, romName)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
         if (coreId == "dolphin") {
+            showPreparingScreen("Menyiapkan Dolphin…\nEkstraksi runtime pertama kali mungkin membutuhkan beberapa detik.")
             traceCoreStage("prepare_dolphin_assets", coreId, romName)
-            if (!installDolphinAssets(systemRoot)) {
-                traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)
-                showLoadError("Dolphin Sys assets tidak ada di APK. Update Emu Hub ke build terbaru.")
-                return
-            }
-            traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)
+            Thread({
+                val ok = installDolphinAssets(systemRoot)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (!ok) {
+                        traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)
+                        showLoadError("Dolphin Sys gagal disiapkan. Log: emu-hub/CORE/core-runtime.log")
+                    } else {
+                        traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)
+                        continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)
+                    }
+                }
+            }, "EmuHub-Dolphin-Prepare").apply { priority = Thread.NORM_PRIORITY - 1 }.start()
+            return
         }
+        continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)
+    }
+
+    private fun continueCoreLaunch(rom:String,coreId:String,romName:String,coreFile:String,coreLabel:String,systemRoot:File){
         val saveDir = StoragePaths.savesDir(this)
         stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")
         traceCoreStage("resolve_core", coreId, romName)
@@ -87,6 +100,17 @@ class GameActivity : Activity() {
         setContentView(root)
         enableSafeFullscreen()
         gameView?.start()
+    }
+
+    private fun showPreparingScreen(message:String){
+        setContentView(TextView(this).apply {
+            text=message
+            gravity=Gravity.CENTER
+            textSize=18f
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFF050507.toInt())
+            setPadding(dp(24),dp(24),dp(24),dp(24))
+        })
     }
 
     private fun traceCoreStage(stage:String,coreId:String,romName:String,active:Boolean=true){
