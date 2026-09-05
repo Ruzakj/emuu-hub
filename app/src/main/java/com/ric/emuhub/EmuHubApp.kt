@@ -34,6 +34,7 @@ class EmuHubApp : Application() {
         val isJ2meProcess = processName.endsWith(":j2me")
 
         if (isMainProcess) {
+            runCatching { BuiltinRomManager.install(this) }
             EnginePackManager.bootstrapAsync(this)
             Thread({ runCatching { StoragePaths.ensureLayout(applicationContext) } }, "emuhub-storage-init").start()
             StorageMaintenance.runAsync(this)
