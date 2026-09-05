@@ -1,0 +1,4 @@
+Emu Hub Unified Library + PS2 Performance baseline.
+Manual PS2 per-game overrides remain first-class: save/reset by ROM path, including upscale, EE rate, cycle skip, MTVU, affinity, and speed percent.
+Auto profile is the default; saved manual per-game profile always takes precedence on next launch.
+This runtime asset change intentionally triggers Build Android APK and the automatic stable in-app updater pipeline.
