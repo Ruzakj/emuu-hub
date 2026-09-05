@@ -78,9 +78,11 @@ class MainActivity : Activity() {
         Thread({ runCatching { ArchiveHelper.cleanupStale(cacheDir) } }, "emuhub-archive-clean").start()
         ensureDefaultPspResolution()
         migrateLegacyFolder()
+        val builtin = ensureBuiltinGames()
         renderHome()
-        val cached = loadCache()
-        if (cached.isNotEmpty()) renderLibrary(cached, "${cached.size} game • cache") else showEmptyLibrary()
+        val cached = sortGames((builtin + loadCache()).distinctBy { it.uri })
+        saveCache(cached)
+        if (cached.isNotEmpty()) renderLibrary(cached, "${cached.size} game • built-in + cache") else showEmptyLibrary()
         refreshAllFolders(false)
     }
 
@@ -205,12 +207,32 @@ class MainActivity : Activity() {
     private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)},REQUEST_FOLDER)}
     private fun openRomPicker(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply{addCategory(Intent.CATEGORY_OPENABLE);type="*/*";addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)},REQUEST_ROM)}
 
+    private fun ensureBuiltinGames():List<GameEntry>{
+        val root=File(filesDir,"builtin-roms").apply{mkdirs()}
+        val games=mutableListOf<GameEntry>()
+        for(system in listOf("NES","GBA","SNES")){
+            val assetDir="builtin-roms/$system"
+            for(name in runCatching{assets.list(assetDir)?.toList().orEmpty()}.getOrDefault(emptyList())){
+                val ext=extension(name)
+                if(ext !in INTERNAL)continue
+                val dir=File(root,system).apply{mkdirs()}
+                val out=File(dir,name)
+                runCatching{
+                    assets.open("$assetDir/$name").use{input->out.outputStream().use{output->input.copyTo(output)}}
+                }.onFailure{out.delete()}
+                if(out.isFile&&out.length()>0L)games.add(GameEntry(Uri.fromFile(out).toString(),name,ext,"BUILT-IN/$system"))
+            }
+        }
+        return sortGames(games.distinctBy{it.uri})
+    }
+
     private fun refreshAllFolders(userRequested:Boolean){
+        val builtin=ensureBuiltinGames()
         val trees=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.filter{it.isNotBlank()}.orEmpty()
-        if(trees.isEmpty()){if(userRequested)chooseRomFolder();return}
+        if(trees.isEmpty()){saveCache(builtin);if(builtin.isEmpty())showEmptyLibrary() else renderLibrary(builtin,"${builtin.size} built-in game");if(userRequested)chooseRomFolder();return}
         status.text=if(userRequested)"Refreshing ${trees.size} folder..." else "Library ready • background scan"
         val pending=AtomicInteger(trees.size);val merged=java.util.Collections.synchronizedList(mutableListOf<GameEntry>())
-        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames(merged.distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • ${trees.size} folder")}}}}
+        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames((builtin+merged).distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • built-in + ${trees.size} folder")}}}}
     }
 
     private fun collectGames(dir:DocumentFile,out:MutableList<GameEntry>,limit:Int,folder:String){
