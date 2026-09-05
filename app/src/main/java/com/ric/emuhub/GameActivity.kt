@@ -125,7 +125,7 @@ class GameActivity : Activity() {
             coreId=="pcsx" && ("final fantasy ix" in n || "final fantasy 9" in n || "ff9" in n) -> GameProfile("ps1-rpg","Z9x PS1 RPG",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="ppsspp" -> GameProfile("psp-balanced","Z9x PSP Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
-            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
+            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",1,Process.THREAD_PRIORITY_URGENT_DISPLAY,false)
             else -> GameProfile("classic","Classic",3,Process.THREAD_PRIORITY_DISPLAY,true)
         }
     }
