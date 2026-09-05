@@ -1,0 +1,49 @@
+name: Add GameCube Wii Dolphin Integration
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/add-dolphin-gc-wii.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch GameCube and Wii support
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          s=s.replace('private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")', 'private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","gcm","rvz","wbfs","wia","wad","dol")')
+          s=s.replace('private val EDEN_PACKAGES = listOf(', 'private const val DOLPHIN_PACKAGE = "org.dolphinemu.dolphinemu"\n        private val EDEN_PACKAGES = listOf(')
+          s=s.replace('"ps1" in t || "psx" in t || "psone" in t || h.contains("playstation 1")->"PS1"\n            else->null', '"ps1" in t || "psx" in t || "psone" in t || h.contains("playstation 1")->"PS1"\n            "gamecube" in t || "gc" in t || "ngc" in t || h.contains("game cube")->"GAMECUBE"\n            "wii" in t || h.contains("nintendo wii")->"WII"\n            else->null')
+          s=s.replace('"xci","nsp","nro"->"SWITCH"\n            "iso"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"', '"xci","nsp","nro"->"SWITCH"\n            "gcm","rvz"->folderConsoleHint(g) ?: "GAMECUBE"\n            "wbfs","wia","wad"->"WII"\n            "dol"->folderConsoleHint(g) ?: "GAMECUBE"\n            "iso"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"')
+          s=s.replace('"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8', '"PSP"->0;"PS1"->1;"PS2"->2;"GAMECUBE"->3;"WII"->4;"GBA"->5;"NES"->6;"SNES"->7;"SWITCH"->8;"DISC"->9;"ARCHIVE"->10')
+          s=s.replace('"PS2"->"PLAYSTATION 2 • ARMSX2"\n        "GBA"->"GAME BOY • MGBA"', '"PS2"->"PLAYSTATION 2 • ARMSX2"\n        "GAMECUBE"->"NINTENDO GAMECUBE • DOLPHIN"\n        "WII"->"NINTENDO WII • DOLPHIN"\n        "GBA"->"GAME BOY • MGBA"')
+          s=s.replace('arrayOf("PS2","ARMSX2","2"),arrayOf("GBA"', 'arrayOf("PS2","ARMSX2","2"),arrayOf("GAMECUBE","Dolphin","C"),arrayOf("WII","Dolphin","W"),arrayOf("GBA"')
+          s=s.replace('val filters=listOf("ALL","PSP","PS1","PS2","GBA","NES","SNES","SWITCH","JAVA")', 'val filters=listOf("ALL","PSP","PS1","PS2","GAMECUBE","WII","GBA","NES","SNES","SWITCH","JAVA")')
+          s=s.replace('"PSP"->"P";"PS1"->"1";"PS2"->"2";"GBA"', '"PSP"->"P";"PS1"->"1";"PS2"->"2";"GAMECUBE"->"C";"WII"->"W";"GBA"')
+          s=s.replace('"PS2"->launchPs2OrSetup(uri,g.name)\n            "GBA","NES","SNES"', '"PS2"->launchPs2OrSetup(uri,g.name)\n            "GAMECUBE","WII"->launchDolphin(target)\n            "GBA","NES","SNES"')
+          s=s.replace('private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"', 'private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->launchDolphin(if(ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE");ext=="ecm"')
+          marker='    private fun launchEden(uri:Uri){'
+          dolphin='''    private fun launchDolphin(system:String){\n        val platform=if(system=="WII")"wii" else "gamecube"\n        val deep=Intent(Intent.ACTION_VIEW,Uri.parse("dolphinemu://app/browse/$platform")).apply{setPackage(DOLPHIN_PACKAGE)}\n        try{\n            startActivity(deep)\n            status.text="$system • Dolphin"\n        }catch(_:Exception){\n            AlertDialog.Builder(this).setTitle("Dolphin Emulator diperlukan").setMessage("GameCube dan Wii menggunakan Dolphin resmi. Install Dolphin sekali, lalu Emu Hub akan membuka library Dolphin dari game shelf.").setPositiveButton("DOWNLOAD DOLPHIN"){_,_->\n                runCatching{startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://dolphin-emu.org/download/")))}\n            }.setNegativeButton("Batal",null).show()\n        }\n    }\n\n'''
+          if dolphin.strip() not in s:
+              s=s.replace(marker,dolphin+marker)
+          s=s.replace('"iso"->"PS1 / PSP / PS2 • choose engine";', '"gcm","rvz"->"Nintendo GameCube • Dolphin";"wbfs","wia","wad","dol"->"Nintendo Wii / GameCube • Dolphin";"iso"->"PS1 / PSP / PS2 / GC / Wii • choose engine";')
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'GAMECUBE' app/src/main/java/com/ric/emuhub/MainActivity.kt
+          grep -q 'launchDolphin' app/src/main/java/com/ric/emuhub/MainActivity.kt
+      - name: Commit integration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt
+          git commit -m "Add GameCube and Wii Dolphin routing"
+          git push
