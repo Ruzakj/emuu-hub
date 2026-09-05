@@ -1,0 +1,3 @@
+Emu Hub Dolphin first-frame hotfix v1
+Stable release must package libdolphin_core.so and Dolphin/Sys.
+Runtime prepare path is guarded and traced.
