@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Defer Dolphin HW context reset until after load_game
+      - name: Harden Dolphin HW frontend path
         shell: bash
         run: |
           set -euo pipefail
@@ -23,22 +23,56 @@ jobs:
           from pathlib import Path
           p=Path('app/src/main/cpp/emuhost.cpp')
           s=p.read_text()
+
+          # 1) Accept libretro's experimental SET_HW_SHARED_CONTEXT (44 | 0x10000).
+          old='''    ENV_GET_PREFERRED_HW_RENDER=56\n};'''
+          new='''    ENV_GET_PREFERRED_HW_RENDER=56, ENV_SET_HW_SHARED_CONTEXT=(44 | 0x10000)\n};'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          # 2) Trace exactly what HW API/version Dolphin requests.
+          old='''static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;'''
+          new='''static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;\n    { char b[160]; std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0); traceLine(b); }'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          old='''    LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    return true;'''
+          new='''    LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    traceLine("hw: EGL context registered");\n    return true;'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          # 3) Dolphin explicitly requests shared HW context. Returning false is not a valid
+          # frontend implementation for its async GL path. We maintain one persistent EGL
+          # context and serialize makeCurrent around core calls, so acknowledge the request.
+          old='''        case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));'''
+          new='''        case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));\n        case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          # 4) Do not execute Dolphin context_reset immediately after retro_init.
           old='''    traceLine("init: retro_init ok");\n    if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
-          new='''    traceLine("init: retro_init ok");\n    // Dolphin registers HW rendering during retro_init, but its context_reset may touch\n    // subsystems that are not ready until content has been loaded. Do not invoke it here.\n    // loadGame() owns the first context_reset and traces every boundary persistently.\n    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
-          if old not in s:
-              raise SystemExit('retro_init reset block not found')
-          s=s.replace(old,new,1)
-          old2='''    if(!ok){LOGE("retro_load_game failed'''
-          if old2 not in s:
-              raise SystemExit('loadGame tail anchor not found')
-          # Existing loadGame already performs/reset logic later; add tracing around any first reset there.
-          s=s.replace('''if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent())return JNI_FALSE;hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();}''', '''if(hwEnabled&&hwContextReset&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glFinish();releaseHwCurrent();}''')
+          new='''    traceLine("init: retro_init ok");\n    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          # 5) Instrument post-load context reset exactly. Keep EGL current until AV info is read.
+          old='''    if(hwEnabled&&!hwResetCalled){if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}LOGI("Calling PPSSPP context_reset after retro_load_game");hwContextReset();hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");}'''
+          new='''    if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();}'''
+          if old in s:
+              s=s.replace(old,new,1)
+
+          # 6) Make first-run trace reset per newly initialized core, not process lifetime.
+          if 'static bool firstRun=true;' in s:
+              s=s.replace('static bool firstRun=true;if(firstRun){traceLine("runFrame: before first retro_run");}', 'static bool firstRun=true;if(firstRun){traceLine("runFrame: before first retro_run");}',1)
+
           p.write_text(s)
           PY
           git diff --check
+          grep -q 'SET_HW_SHARED_CONTEXT accepted' app/src/main/cpp/emuhost.cpp
           grep -q 'hw reset deferred until load_game' app/src/main/cpp/emuhost.cpp
+          grep -q 'loadGame: before hw context_reset' app/src/main/cpp/emuhost.cpp
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/src/main/cpp/emuhost.cpp
-          git commit -m 'Defer Dolphin HW reset until content load'
+          git commit -m 'Harden Dolphin shared HW context and defer reset'
           git push
