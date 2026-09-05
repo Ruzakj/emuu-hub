@@ -1,0 +1,32 @@
+name: Patch Dolphin Manual Tuning
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/patch_dolphin_manual_tuning.py'
+      - '.github/workflows/patch-dolphin-manual-tuning.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply manual tuning patch
+        run: python3 tools/patch_dolphin_manual_tuning.py
+      - name: Verify patch
+        run: |
+          grep -q 'configureDolphin' app/src/main/java/com/ric/emuhub/core/NativeBridge.kt
+          grep -q 'showDolphinTuningMenu' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'dolphinCpuClockPercent' app/src/main/cpp/emuhost.cpp
+      - name: Commit manual tuning
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/ric/emuhub/core/NativeBridge.kt app/src/main/java/com/ric/emuhub/GameActivity.kt app/src/main/cpp/emuhost.cpp
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add per-game Dolphin manual tuning controls'
+          git push
