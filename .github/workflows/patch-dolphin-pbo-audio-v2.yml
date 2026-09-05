@@ -1,0 +1,34 @@
+name: Patch Dolphin PBO Audio V2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-pbo-audio-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply patch
+        run: python3 tools/patch_dolphin_pbo_audio.py
+      - name: Verify patch
+        run: |
+          git diff --check
+          grep -q 'PBO async readback enabled' app/src/main/cpp/emuhost.cpp
+          grep -q 'audio: first batch' app/src/main/cpp/emuhost.cpp
+          grep -q 'runDolphin' app/src/main/java/com/ric/emuhub/GameActivity.kt
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Use async PBO readback and fix Dolphin audio pacing'
+          git push origin main
