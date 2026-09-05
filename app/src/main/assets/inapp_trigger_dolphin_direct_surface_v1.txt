@@ -1,0 +1,2 @@
+Trigger canonical build and in-app update for Dolphin direct Android Surface renderer.
+Source commit: a7a2450cd107d633b418d94f738b6ba6e20bd826
