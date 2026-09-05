@@ -1,0 +1,48 @@
+name: Patch Release Built-in ROM Packaging
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-release-builtin-roms.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch stable release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/release-apk.yml')
+          s=p.read_text()
+          marker='      - name: Prepare thin app shell\n'
+          if 'Stage small legal homebrew starter ROMs' not in s:
+              block='''      - name: Stage small legal homebrew starter ROMs\n        run: |\n          set -euxo pipefail\n          ROOT=app/src/main/assets/builtin-roms\n          rm -rf "$ROOT"\n          mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"\n          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" -o "$ROOT/NES/Galaxy Patrol.nes"\n          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" -o "$ROOT/GBA/Rkanoid Modern.gba"\n          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" -o "$ROOT/GBA/Rkanoid Demo.gba"\n          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"\n          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"\n          test -s "$ROOT/NES/Galaxy Patrol.nes"\n          test -s "$ROOT/GBA/Rkanoid Modern.gba"\n          test -s "$ROOT/GBA/Rkanoid Demo.gba"\n          test -s "$ROOT/SNES/Gothicvania.sfc"\n          test -s "$ROOT/SNES/Hello World Region.sfc"\n\n'''
+              if marker not in s: raise SystemExit('prepare thin shell marker not found')
+              s=s.replace(marker,block+marker,1)
+          verify='''          unzip -l "$APK" | grep -F "assets/builtin-roms/NES/Galaxy Patrol.nes"\n          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Modern.gba"\n          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Demo.gba"\n          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Gothicvania.sfc"\n          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Hello World Region.sfc"\n'''
+          anchor='          "$APKSIGNER" verify --verbose --print-certs "$APK"\n'
+          if 'assets/builtin-roms/NES/Galaxy Patrol.nes' not in s:
+              if anchor not in s: raise SystemExit('verify anchor not found')
+              s=s.replace(anchor,anchor+verify,1)
+          p.write_text(s)
+          PY
+      - name: Commit release packaging fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/release-apk.yml
+          if git diff --cached --quiet; then
+            echo 'No patch needed.'
+          else
+            git commit -m 'Include built-in ROMs in stable in-app release APK'
+            git push
+          fi
