@@ -1,0 +1,45 @@
+name: Patch Dolphin Async Prepare
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-async-prepare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Move Dolphin Sys extraction off UI thread
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          s=p.read_text()
+          old='''        traceCoreStage("prepare", coreId, romName)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        if (coreId == "dolphin") {\n            traceCoreStage("prepare_dolphin_assets", coreId, romName)\n            if (!installDolphinAssets(systemRoot)) {\n                traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)\n                showLoadError("Dolphin Sys assets tidak ada di APK. Update Emu Hub ke build terbaru.")\n                return\n            }\n            traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)\n        }\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        traceCoreStage("resolve_core", coreId, romName)\n        val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")\n        traceCoreStage("resolve_core_done", coreId, romName)\n        if (!File(corePath).isFile) {\n            EnginePackManager.bootstrapAsync(this)\n            showLoadError("$coreLabel engine belum siap. Engine Pack sedang disiapkan; coba lagi setelah selesai.")\n            return\n        }\n        traceCoreStage("native_init", coreId, romName)\n        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("native_init_ok", coreId, romName)\n        if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)\n        traceCoreStage("load_game", coreId, romName)\n        if (!NativeBridge.loadGame(rom)) { traceCoreStage("load_game_failed", coreId, romName, false); showLoadError("$coreLabel gagal memuat ${File(rom).name}. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("load_game_ok", coreId, romName)\n        val root = FrameLayout(this).apply { setBackgroundColor(0xFF050507.toInt()) }\n        gameView = GameView(coreId, gameProfile).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }\n        root.addView(buildGamepadOverlay(coreId), FrameLayout.LayoutParams(-1, -1))\n        setContentView(root)\n        enableSafeFullscreen()\n        gameView?.start()\n'''
+          new='''        traceCoreStage("prepare", coreId, romName)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        if (coreId == "dolphin") {\n            showPreparingScreen("Menyiapkan Dolphin…\\nEkstraksi runtime pertama kali mungkin membutuhkan beberapa detik.")\n            traceCoreStage("prepare_dolphin_assets", coreId, romName)\n            Thread({\n                val ok = installDolphinAssets(systemRoot)\n                runOnUiThread {\n                    if (isFinishing || isDestroyed) return@runOnUiThread\n                    if (!ok) {\n                        traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)\n                        showLoadError("Dolphin Sys gagal disiapkan. Log: emu-hub/CORE/core-runtime.log")\n                    } else {\n                        traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)\n                        continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)\n                    }\n                }\n            }, "EmuHub-Dolphin-Prepare").apply { priority = Thread.NORM_PRIORITY - 1 }.start()\n            return\n        }\n        continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)\n'''
+          if old not in s:
+              raise SystemExit('onCreate launch block not found')
+          s=s.replace(old,new,1)
+          anchor='''    private fun traceCoreStage(stage:String,coreId:String,romName:String,active:Boolean=true){\n'''
+          helper='''    private fun continueCoreLaunch(rom:String,coreId:String,romName:String,coreFile:String,coreLabel:String,systemRoot:File){\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        traceCoreStage("resolve_core", coreId, romName)\n        val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")\n        traceCoreStage("resolve_core_done", coreId, romName)\n        if (!File(corePath).isFile) {\n            EnginePackManager.bootstrapAsync(this)\n            showLoadError("$coreLabel engine belum siap. Engine Pack sedang disiapkan; coba lagi setelah selesai.")\n            return\n        }\n        traceCoreStage("native_init", coreId, romName)\n        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("native_init_ok", coreId, romName)\n        if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)\n        traceCoreStage("load_game", coreId, romName)\n        if (!NativeBridge.loadGame(rom)) { traceCoreStage("load_game_failed", coreId, romName, false); showLoadError("$coreLabel gagal memuat ${File(rom).name}. Log: emu-hub/CORE/core-runtime.log"); return }\n        traceCoreStage("load_game_ok", coreId, romName)\n        val root = FrameLayout(this).apply { setBackgroundColor(0xFF050507.toInt()) }\n        gameView = GameView(coreId, gameProfile).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }\n        root.addView(buildGamepadOverlay(coreId), FrameLayout.LayoutParams(-1, -1))\n        setContentView(root)\n        enableSafeFullscreen()\n        gameView?.start()\n    }\n\n    private fun showPreparingScreen(message:String){\n        setContentView(TextView(this).apply {\n            text=message\n            gravity=Gravity.CENTER\n            textSize=18f\n            setTextColor(0xFFFFFFFF.toInt())\n            setBackgroundColor(0xFF050507.toInt())\n            setPadding(dp(24),dp(24),dp(24),dp(24))\n        })\n    }\n\n'''
+          if anchor not in s:
+              raise SystemExit('trace anchor not found')
+          s=s.replace(anchor,helper+anchor,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'EmuHub-Dolphin-Prepare' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'continueCoreLaunch' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Move Dolphin runtime extraction off UI thread'
+          git push
