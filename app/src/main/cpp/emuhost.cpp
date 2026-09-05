@@ -24,296 +24,34 @@ struct retro_system_av_info { retro_game_geometry geometry; retro_system_timing 
 struct retro_variable { const char* key; const char* value; };
 struct retro_log_callback { void (*log)(int, const char*, ...); };
 
-enum retro_hw_context_type {
-    RETRO_HW_CONTEXT_NONE = 0,
-    RETRO_HW_CONTEXT_OPENGL = 1,
-    RETRO_HW_CONTEXT_OPENGLES2 = 2,
-    RETRO_HW_CONTEXT_OPENGL_CORE = 3,
-    RETRO_HW_CONTEXT_OPENGLES3 = 4,
-    RETRO_HW_CONTEXT_OPENGLES_VERSION = 5,
-    RETRO_HW_CONTEXT_VULKAN = 6
-};
-using retro_hw_get_current_framebuffer_t = uintptr_t(*)();
-using retro_hw_get_proc_address_t = void*(*)(const char*);
-struct retro_hw_render_callback {
-    retro_hw_context_type context_type;
-    void (*context_reset)();
-    retro_hw_get_current_framebuffer_t get_current_framebuffer;
-    retro_hw_get_proc_address_t get_proc_address;
-    bool depth;
-    bool stencil;
-    bool bottom_left_origin;
-    unsigned version_major;
-    unsigned version_minor;
-    bool cache_context;
-    void (*context_destroy)();
-    bool debug_context;
-};
+enum retro_hw_context_type { RETRO_HW_CONTEXT_NONE=0, RETRO_HW_CONTEXT_OPENGL=1, RETRO_HW_CONTEXT_OPENGLES2=2, RETRO_HW_CONTEXT_OPENGL_CORE=3, RETRO_HW_CONTEXT_OPENGLES3=4, RETRO_HW_CONTEXT_OPENGLES_VERSION=5, RETRO_HW_CONTEXT_VULKAN=6 };
+using retro_hw_get_current_framebuffer_t=uintptr_t(*)(); using retro_hw_get_proc_address_t=void*(*)(const char*);
+struct retro_hw_render_callback { retro_hw_context_type context_type; void(*context_reset)(); retro_hw_get_current_framebuffer_t get_current_framebuffer; retro_hw_get_proc_address_t get_proc_address; bool depth; bool stencil; bool bottom_left_origin; unsigned version_major; unsigned version_minor; bool cache_context; void(*context_destroy)(); bool debug_context; };
 
 enum { RETRO_PIXEL_FORMAT_0RGB1555=0, RETRO_PIXEL_FORMAT_XRGB8888=1, RETRO_PIXEL_FORMAT_RGB565=2 };
-enum {
-    ENV_SET_ROTATION=1, ENV_GET_OVERSCAN=2, ENV_GET_CAN_DUPE=3, ENV_SET_MESSAGE=6,
-    ENV_SHUTDOWN=7, ENV_SET_PERFORMANCE_LEVEL=8, ENV_GET_SYSTEM_DIRECTORY=9,
-    ENV_SET_PIXEL_FORMAT=10, ENV_SET_INPUT_DESCRIPTORS=11, ENV_SET_HW_RENDER=14,
-    ENV_GET_VARIABLE=15, ENV_SET_VARIABLES=16, ENV_GET_VARIABLE_UPDATE=17,
-    ENV_SET_SUPPORT_NO_GAME=18, ENV_GET_LOG_INTERFACE=27, ENV_GET_SAVE_DIRECTORY=31,
-    ENV_SET_SYSTEM_AV_INFO=32, ENV_SET_CONTROLLER_INFO=35, ENV_SET_MEMORY_MAPS=36,
-    ENV_SET_GEOMETRY=37, ENV_GET_LANGUAGE=39, ENV_GET_INPUT_BITMASKS=51,
-    ENV_GET_PREFERRED_HW_RENDER=56, ENV_SET_HW_SHARED_CONTEXT=(44 | 0x10000)
-};
-enum { RETRO_DEVICE_JOYPAD=1, RETRO_DEVICE_ANALOG=5, RETRO_DEVICE_INDEX_ANALOG_LEFT=0, RETRO_DEVICE_ID_ANALOG_X=0, RETRO_DEVICE_ID_ANALOG_Y=1, RETRO_DEVICE_ID_JOYPAD_MASK=256 };
+enum { ENV_SET_ROTATION=1,ENV_GET_OVERSCAN=2,ENV_GET_CAN_DUPE=3,ENV_SET_MESSAGE=6,ENV_SHUTDOWN=7,ENV_SET_PERFORMANCE_LEVEL=8,ENV_GET_SYSTEM_DIRECTORY=9,ENV_SET_PIXEL_FORMAT=10,ENV_SET_INPUT_DESCRIPTORS=11,ENV_SET_HW_RENDER=14,ENV_GET_VARIABLE=15,ENV_SET_VARIABLES=16,ENV_GET_VARIABLE_UPDATE=17,ENV_SET_SUPPORT_NO_GAME=18,ENV_GET_LOG_INTERFACE=27,ENV_GET_SAVE_DIRECTORY=31,ENV_SET_SYSTEM_AV_INFO=32,ENV_SET_CONTROLLER_INFO=35,ENV_SET_MEMORY_MAPS=36,ENV_SET_GEOMETRY=37,ENV_GET_LANGUAGE=39,ENV_GET_INPUT_BITMASKS=51,ENV_GET_PREFERRED_HW_RENDER=56,ENV_SET_HW_SHARED_CONTEXT=(44|0x10000) };
+enum { RETRO_DEVICE_JOYPAD=1,RETRO_DEVICE_ANALOG=5,RETRO_DEVICE_INDEX_ANALOG_LEFT=0,RETRO_DEVICE_ID_ANALOG_X=0,RETRO_DEVICE_ID_ANALOG_Y=1,RETRO_DEVICE_ID_JOYPAD_MASK=256 };
+using retro_environment_t=bool(*)(unsigned,void*); using retro_video_refresh_t=void(*)(const void*,unsigned,unsigned,size_t); using retro_audio_sample_t=void(*)(int16_t,int16_t); using retro_audio_sample_batch_t=size_t(*)(const int16_t*,size_t); using retro_input_poll_t=void(*)(); using retro_input_state_t=int16_t(*)(unsigned,unsigned,unsigned,unsigned);
 
-using retro_environment_t=bool(*)(unsigned,void*);
-using retro_video_refresh_t=void(*)(const void*,unsigned,unsigned,size_t);
-using retro_audio_sample_t=void(*)(int16_t,int16_t);
-using retro_audio_sample_batch_t=size_t(*)(const int16_t*,size_t);
-using retro_input_poll_t=void(*)();
-using retro_input_state_t=int16_t(*)(unsigned,unsigned,unsigned,unsigned);
-
-static void* core=nullptr;
-static std::string systemDir,saveDir;
-static int pixelFormat=RETRO_PIXEL_FORMAT_0RGB1555;
-static unsigned frameW=240,frameH=160;
-static int sampleRate=44100;
-static std::vector<uint32_t> frame;
-static std::vector<uint32_t> rgbaScratch;
-static std::vector<int16_t> audioBuffer;
-static bool buttons[16]={};
-static int16_t analogX=0,analogY=0;
-static bool isPpsspp=false;
-static bool isDolphin=false;
-static bool shutdownRequested=false;
-static std::string runtimeLogPath;
-
-static void traceLine(const char* msg){
-    LOGE("TRACE %s",msg?msg:"(null)");
-    if(runtimeLogPath.empty())return;
-    std::ofstream o(runtimeLogPath,std::ios::app);
-    if(!o)return;
-    std::time_t now=std::time(nullptr);
-    o << (long long)now << " " << (msg?msg:"(null)") << "\n";
-    o.flush();
-}
-
-static EGLDisplay eglDisplay=EGL_NO_DISPLAY;
-static EGLContext eglContext=EGL_NO_CONTEXT;
-static EGLSurface eglSurface=EGL_NO_SURFACE;
-static bool hwEnabled=false;
-static bool hwResetCalled=false;
-static bool hwBottomLeft=true;
-static void(*hwContextReset)()=nullptr;
-static void(*hwContextDestroy)()=nullptr;
-
-static void(*p_retro_init)()=nullptr;
-static void(*p_retro_deinit)()=nullptr;
-static void(*p_retro_set_environment)(retro_environment_t)=nullptr;
-static void(*p_retro_set_video_refresh)(retro_video_refresh_t)=nullptr;
-static void(*p_retro_set_audio_sample)(retro_audio_sample_t)=nullptr;
-static void(*p_retro_set_audio_sample_batch)(retro_audio_sample_batch_t)=nullptr;
-static void(*p_retro_set_input_poll)(retro_input_poll_t)=nullptr;
-static void(*p_retro_set_input_state)(retro_input_state_t)=nullptr;
-static void(*p_retro_set_controller_port_device)(unsigned,unsigned)=nullptr;
-static bool(*p_retro_load_game)(const retro_game_info*)=nullptr;
-static void(*p_retro_unload_game)()=nullptr;
-static void(*p_retro_run)()=nullptr;
-static void(*p_retro_reset)()=nullptr;
-static void(*p_retro_get_system_av_info)(retro_system_av_info*)=nullptr;
-static size_t(*p_retro_serialize_size)()=nullptr;
-static bool(*p_retro_serialize)(void*,size_t)=nullptr;
-static bool(*p_retro_unserialize)(const void*,size_t)=nullptr;
-
-static void coreLog(int level,const char* fmt,...){ va_list ap; va_start(ap,fmt); __android_log_vprint(level>=3?ANDROID_LOG_ERROR:ANDROID_LOG_INFO,"LibretroCore",fmt,ap); va_end(ap); }
-
-static bool makeHwCurrent(){
-    return hwEnabled && eglDisplay!=EGL_NO_DISPLAY && eglSurface!=EGL_NO_SURFACE && eglContext!=EGL_NO_CONTEXT &&
-           eglMakeCurrent(eglDisplay,eglSurface,eglSurface,eglContext)==EGL_TRUE;
-}
-static void releaseHwCurrent(){ if(eglDisplay!=EGL_NO_DISPLAY) eglMakeCurrent(eglDisplay,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT); }
-static uintptr_t hwFramebuffer(){ return 0; }
-static void* hwProc(const char* name){ if(!name)return nullptr; void* p=reinterpret_cast<void*>(eglGetProcAddress(name)); if(!p)p=dlsym(RTLD_DEFAULT,name); return p; }
-
-static void destroyHw(){
-    if(eglDisplay!=EGL_NO_DISPLAY){
-        if(eglContext!=EGL_NO_CONTEXT && hwContextDestroy && hwResetCalled && makeHwCurrent()) hwContextDestroy();
-        releaseHwCurrent();
-        if(eglContext!=EGL_NO_CONTEXT) eglDestroyContext(eglDisplay,eglContext);
-        if(eglSurface!=EGL_NO_SURFACE) eglDestroySurface(eglDisplay,eglSurface);
-        eglTerminate(eglDisplay);
-    }
-    eglDisplay=EGL_NO_DISPLAY; eglContext=EGL_NO_CONTEXT; eglSurface=EGL_NO_SURFACE;
-    hwEnabled=false; hwResetCalled=false; hwContextReset=nullptr; hwContextDestroy=nullptr;
-}
-
-static bool createHw(retro_hw_render_callback* cb){
-    if(!cb)return false;
-    { char b[160]; std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0); traceLine(b); }
-    if(cb->context_type!=RETRO_HW_CONTEXT_OPENGLES2 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES3 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES_VERSION){ LOGE("Unsupported HW context type %d",(int)cb->context_type); return false; }
-    destroyHw();
-    eglDisplay=eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if(eglDisplay==EGL_NO_DISPLAY || !eglInitialize(eglDisplay,nullptr,nullptr)){ LOGE("eglInitialize failed: 0x%x",eglGetError()); destroyHw(); return false; }
-    EGLint renderable=EGL_OPENGL_ES2_BIT;
-#ifdef EGL_OPENGL_ES3_BIT_KHR
-    renderable|=EGL_OPENGL_ES3_BIT_KHR;
-#else
-    renderable|=0x0040;
-#endif
-    const EGLint cfgAttrs[]={EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,renderable,EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,cb->depth?24:0,EGL_STENCIL_SIZE,cb->stencil?8:0,EGL_NONE};
-    EGLConfig cfg=nullptr; EGLint count=0;
-    if(!eglChooseConfig(eglDisplay,cfgAttrs,&cfg,1,&count)||count<1){ LOGE("eglChooseConfig failed: 0x%x",eglGetError()); destroyHw(); return false; }
-    const EGLint pbAttrs[]={EGL_WIDTH,1024,EGL_HEIGHT,1024,EGL_NONE};
-    eglSurface=eglCreatePbufferSurface(eglDisplay,cfg,pbAttrs);
-    if(eglSurface==EGL_NO_SURFACE){ LOGE("eglCreatePbufferSurface failed: 0x%x",eglGetError()); destroyHw(); return false; }
-    unsigned major=cb->version_major;
-    if(cb->context_type==RETRO_HW_CONTEXT_OPENGLES3 && major<3)major=3;
-    if(major<2)major=2;
-    if(!eglBindAPI(EGL_OPENGL_ES_API)){ LOGE("eglBindAPI failed: 0x%x",eglGetError()); destroyHw(); return false; }
-    const EGLint ctxAttrs[]={EGL_CONTEXT_CLIENT_VERSION,(EGLint)major,EGL_NONE};
-    eglContext=eglCreateContext(eglDisplay,cfg,EGL_NO_CONTEXT,ctxAttrs);
-    if(eglContext==EGL_NO_CONTEXT){ LOGE("eglCreateContext GLES%u failed: 0x%x",major,eglGetError()); destroyHw(); return false; }
-    hwEnabled=true; hwBottomLeft=cb->bottom_left_origin; hwContextReset=cb->context_reset; hwContextDestroy=cb->context_destroy;
-    cb->get_current_framebuffer=hwFramebuffer; cb->get_proc_address=hwProc;
-    if(!makeHwCurrent()){ LOGE("eglMakeCurrent failed: 0x%x",eglGetError()); destroyHw(); return false; }
-    glViewport(0,0,1024,1024); glClearColor(0,0,0,1); glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT); glFinish();
-    releaseHwCurrent();
-    LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);
-    traceLine("hw: EGL context registered");
-    return true;
-}
-
-static const char* dolphinOption(const char* key){
-    if(!key)return nullptr;
-    if(std::strcmp(key,"dolphin_cpu_core")==0)return "JITARM64";
-    if(std::strcmp(key,"dolphin_cpu_clock_rate")==0)return "100%";
-    if(std::strcmp(key,"dolphin_fastmem")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_dsp_hle")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_dsp_jit")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_emulation_speed")==0)return "100%";
-    if(std::strcmp(key,"dolphin_widescreen")==0)return "disabled";
-    if(std::strcmp(key,"dolphin_progressive_scan")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_pal60")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_enable_rumble")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_wiimote_continuous_scanning")==0)return "disabled";
-    if(std::strcmp(key,"dolphin_cheats_enabled")==0)return "disabled";
-    if(std::strcmp(key,"dolphin_osd_enabled")==0)return "enabled";
-    if(std::strcmp(key,"dolphin_log_level")==0)return "Error";
-    return nullptr;
-}
-
-static const char* ppssppOption(const char* key){
-    if(!key)return nullptr;
-    if(std::strcmp(key,"ppsspp_backend")==0)return "opengl";
-    if(std::strcmp(key,"ppsspp_rendering_mode")==0)return "OpenGL";
-    if(std::strcmp(key,"ppsspp_internal_resolution")==0)return "960x544";
-    if(std::strcmp(key,"ppsspp_cpu_core")==0)return "JIT";
-    if(std::strcmp(key,"ppsspp_fast_memory")==0)return "enabled";
-    if(std::strcmp(key,"ppsspp_io_timing_method")==0)return "Fast";
-    if(std::strcmp(key,"ppsspp_frameskip")==0)return "1";
-    if(std::strcmp(key,"ppsspp_auto_frameskip")==0)return "enabled";
-    if(std::strcmp(key,"ppsspp_software_rendering")==0)return "disabled";
-    if(std::strcmp(key,"ppsspp_skip_buffer_effects")==0)return "disabled";
-    if(std::strcmp(key,"ppsspp_gpu_hardware_transform")==0)return "enabled";
-    if(std::strcmp(key,"ppsspp_software_skinning")==0)return "enabled";
-    if(std::strcmp(key,"ppsspp_hardware_tesselation")==0)return "disabled";
-    if(std::strcmp(key,"ppsspp_texture_scaling_level")==0)return "disabled";
-    return nullptr;
-}
-
-static bool envCb(unsigned cmd,void* data){
-    switch(cmd){
-        case ENV_GET_CAN_DUPE:*reinterpret_cast<bool*>(data)=true;return true;
-        case ENV_GET_OVERSCAN:*reinterpret_cast<bool*>(data)=false;return true;
-        case ENV_SHUTDOWN:shutdownRequested=true;LOGE("Core requested frontend shutdown");return true;
-        case ENV_GET_SYSTEM_DIRECTORY:*reinterpret_cast<const char**>(data)=systemDir.c_str();return true;
-        case ENV_GET_SAVE_DIRECTORY:*reinterpret_cast<const char**>(data)=saveDir.c_str();return true;
-        case ENV_SET_PIXEL_FORMAT:pixelFormat=*reinterpret_cast<const int*>(data);return true;
-        case ENV_GET_VARIABLE_UPDATE:*reinterpret_cast<bool*>(data)=false;return true;
-        case ENV_GET_VARIABLE:{auto*v=reinterpret_cast<retro_variable*>(data);if(!v)return false;v->value=isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr);if(v->value){LOGI("Core option %s=%s",v->key,v->value);return true;}return false;}
-        case ENV_GET_LOG_INTERFACE:{auto*l=reinterpret_cast<retro_log_callback*>(data);l->log=coreLog;return true;}
-        case ENV_GET_LANGUAGE:*reinterpret_cast<unsigned*>(data)=0;return true;
-        case ENV_GET_INPUT_BITMASKS:return true;
-        case ENV_GET_PREFERRED_HW_RENDER:*reinterpret_cast<unsigned*>(data)=RETRO_HW_CONTEXT_OPENGLES3;return true;
-        case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));
-        case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;
-        case ENV_SET_SYSTEM_AV_INFO:{auto*av=reinterpret_cast<retro_system_av_info*>(data);if(av){frameW=av->geometry.base_width;frameH=av->geometry.base_height;sampleRate=(int)(av->timing.sample_rate>0?av->timing.sample_rate:44100);}return true;}
-        case ENV_SET_GEOMETRY:{auto*g=reinterpret_cast<retro_game_geometry*>(data);if(g){frameW=g->base_width;frameH=g->base_height;}return true;}
-        case ENV_SET_VARIABLES:case ENV_SET_INPUT_DESCRIPTORS:case ENV_SET_SUPPORT_NO_GAME:case ENV_SET_ROTATION:case ENV_SET_MESSAGE:case ENV_SET_PERFORMANCE_LEVEL:case ENV_SET_CONTROLLER_INFO:case ENV_SET_MEMORY_MAPS:return true;
-        default:return false;
-    }
-}
-
-static void captureHw(unsigned width,unsigned height){
-    static bool firstCapture=true;
-    if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}
-    if(width==0||height==0||width>1024||height>1024)return;
-    frameW=width;frameH=height;
-    const size_t pixelCount=(size_t)width*height;
-    if(rgbaScratch.size()!=pixelCount)rgbaScratch.resize(pixelCount);
-    if(frame.size()!=pixelCount)frame.resize(pixelCount);
-    GLint previousFbo=0;
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING,&previousFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER,0);
-    glPixelStorei(GL_PACK_ALIGNMENT,4);
-    glReadPixels(0,0,(GLsizei)width,(GLsizei)height,GL_RGBA,GL_UNSIGNED_BYTE,rgbaScratch.data());
-    const GLenum err=glGetError();
-    glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)previousFbo);
-    if(err!=GL_NO_ERROR){LOGE("glReadPixels failed: 0x%x, %ux%u",err,width,height);return;}
-    for(unsigned y=0;y<height;y++){
-        const unsigned sy=hwBottomLeft?(height-1-y):y;
-        const uint32_t* src=rgbaScratch.data()+(size_t)sy*width;
-        uint32_t* dst=frame.data()+(size_t)y*width;
-        for(unsigned x=0;x<width;x++){
-            const uint32_t p=src[x];
-            dst[x]=0xFF000000u|((p&0x000000FFu)<<16)|(p&0x0000FF00u)|((p&0x00FF0000u)>>16);
-        }
-    }
-}
-
-static void videoCb(const void* data,unsigned width,unsigned height,size_t pitch){
-    if(data==reinterpret_cast<const void*>(-1)){captureHw(width,height);return;} if(!data)return;
-    frameW=width;frameH=height;frame.resize((size_t)width*height);
-    for(unsigned y=0;y<height;y++){const uint8_t*row=(const uint8_t*)data+y*pitch;for(unsigned x=0;x<width;x++){uint32_t argb=0xFF000000u;if(pixelFormat==RETRO_PIXEL_FORMAT_XRGB8888){uint32_t p=((const uint32_t*)row)[x];argb|=p&0x00FFFFFFu;}else if(pixelFormat==RETRO_PIXEL_FORMAT_RGB565){uint16_t p=((const uint16_t*)row)[x];argb|=(((p>>11)&31)*255/31<<16)|(((p>>5)&63)*255/63<<8)|((p&31)*255/31);}else{uint16_t p=((const uint16_t*)row)[x];argb|=(((p>>10)&31)*255/31<<16)|(((p>>5)&31)*255/31<<8)|((p&31)*255/31);}frame[(size_t)y*width+x]=argb;}}
-}
-static void audioCb(int16_t l,int16_t r){audioBuffer.push_back(l);audioBuffer.push_back(r);} static size_t audioBatchCb(const int16_t*d,size_t n){if(d&&n)audioBuffer.insert(audioBuffer.end(),d,d+n*2);return n;} static void inputPollCb(){}
-static int16_t inputStateCb(unsigned port,unsigned device,unsigned index,unsigned id){if(port!=0)return 0;if(device==RETRO_DEVICE_JOYPAD&&index==0){if(id==RETRO_DEVICE_ID_JOYPAD_MASK){uint16_t mask=0;for(unsigned i=0;i<16;i++)if(buttons[i])mask|=(uint16_t)(1u<<i);return(int16_t)mask;}if(id<16)return buttons[id]?1:0;}if(device==RETRO_DEVICE_ANALOG&&index==RETRO_DEVICE_INDEX_ANALOG_LEFT){if(id==RETRO_DEVICE_ID_ANALOG_X)return analogX;if(id==RETRO_DEVICE_ID_ANALOG_Y)return analogY;}return 0;}
-
-template<typename T>static bool sym(T&out,const char*n){out=reinterpret_cast<T>(dlsym(core,n));if(!out){LOGE("Missing symbol %s",n);return false;}return true;}template<typename T>static void opt(T&out,const char*n){out=reinterpret_cast<T>(dlsym(core,n));}
-
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setLogPath(JNIEnv*e,jobject,jstring path){ const char*p=e->GetStringUTFChars(path,nullptr); runtimeLogPath=p?p:""; e->ReleaseStringUTFChars(path,p); if(!runtimeLogPath.empty()){ std::ofstream o(runtimeLogPath,std::ios::trunc); if(o){o<<"EMU HUB CORE TRACE\n";o.flush();} } }
-
-extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init(JNIEnv*e,jobject,jstring c,jstring s,jstring v){
-    shutdownRequested=false;
-    const char*cp=e->GetStringUTFChars(c,nullptr),*sp=e->GetStringUTFChars(s,nullptr),*sv=e->GetStringUTFChars(v,nullptr);
-    isPpsspp=std::strstr(cp,"ppsspp")!=nullptr;isDolphin=std::strstr(cp,"dolphin")!=nullptr;const bool wantsAnalog=std::strstr(cp,"pcsx")!=nullptr||isDolphin;systemDir=sp;saveDir=sv;traceLine(isDolphin?"init: dolphin detected":"init: non-dolphin core");traceLine("init: before dlopen");core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);
-    e->ReleaseStringUTFChars(c,cp);e->ReleaseStringUTFChars(s,sp);e->ReleaseStringUTFChars(v,sv);if(!core){LOGE("dlopen: %s",dlerror());traceLine("init: dlopen failed");return JNI_FALSE;}traceLine("init: dlopen ok");
-    if(!sym(p_retro_init,"retro_init")||!sym(p_retro_deinit,"retro_deinit")||!sym(p_retro_set_environment,"retro_set_environment")||!sym(p_retro_set_video_refresh,"retro_set_video_refresh")||!sym(p_retro_set_audio_sample,"retro_set_audio_sample")||!sym(p_retro_set_audio_sample_batch,"retro_set_audio_sample_batch")||!sym(p_retro_set_input_poll,"retro_set_input_poll")||!sym(p_retro_set_input_state,"retro_set_input_state")||!sym(p_retro_load_game,"retro_load_game")||!sym(p_retro_unload_game,"retro_unload_game")||!sym(p_retro_run,"retro_run")||!sym(p_retro_reset,"retro_reset")||!sym(p_retro_get_system_av_info,"retro_get_system_av_info"))return JNI_FALSE;
-    opt(p_retro_set_controller_port_device,"retro_set_controller_port_device");opt(p_retro_serialize_size,"retro_serialize_size");opt(p_retro_serialize,"retro_serialize");opt(p_retro_unserialize,"retro_unserialize");
-    p_retro_set_environment(envCb);p_retro_set_video_refresh(videoCb);p_retro_set_audio_sample(audioCb);p_retro_set_audio_sample_batch(audioBatchCb);p_retro_set_input_poll(inputPollCb);p_retro_set_input_state(inputStateCb);
-    traceLine("init: before retro_init");
-    p_retro_init();
-    traceLine("init: retro_init ok");
-    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");
-    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
-    traceLine("init: complete");
-    LOGI("Core initialized: ppsspp=%d dolphin=%d hw=%d reset=%d",isPpsspp?1:0,isDolphin?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
-}
-
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setControllerDevice(JNIEnv*,jobject,jint device){if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,device==RETRO_DEVICE_ANALOG?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);}
-extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){
-    traceLine("loadGame: enter");const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};traceLine("loadGame: before retro_load_game");bool ok=p_retro_load_game&&p_retro_load_game(&info);traceLine(ok?"loadGame: retro_load_game ok":"loadGame: retro_load_game failed");e->ReleaseStringUTFChars(path,p);
-    if(!ok){LOGE("retro_load_game failed");if(hwEnabled)releaseHwCurrent();return JNI_FALSE;}
-    if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();}
-    if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d reset=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0,hwResetCalled?1:0);}
-    if(hwEnabled)releaseHwCurrent();return JNI_TRUE;
-}
-extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_runFrame(JNIEnv*e,jobject,jintArray p){
-    if(shutdownRequested)return -2;if(!p_retro_run)return -1;
-    if(hwEnabled){if(!hwResetCalled){LOGE("Blocked retro_run: HW context was never reset");return -4;}if(!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}}
-    static bool firstRun=true;if(firstRun){traceLine("runFrame: before first retro_run");}p_retro_run();if(firstRun){traceLine("runFrame: first retro_run ok");firstRun=false;}if(shutdownRequested)return -2;
-    jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,(jsize)c,(const jint*)frame.data());return(jint)c;
-}
-extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getWidth(JNIEnv*,jobject){return frameW;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getHeight(JNIEnv*,jobject){return frameH;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getSampleRate(JNIEnv*,jobject){return sampleRate;}
-extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudio(JNIEnv*e,jobject,jshortArray out){if(!out||audioBuffer.empty())return 0;size_t c=std::min((size_t)e->GetArrayLength(out),audioBuffer.size());e->SetShortArrayRegion(out,0,(jsize)c,(const jshort*)audioBuffer.data());audioBuffer.erase(audioBuffer.begin(),audioBuffer.begin()+(long)c);return(jint)c;}
-extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_saveState(JNIEnv*e,jobject,jstring path){if(!p_retro_serialize_size||!p_retro_serialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();size_t z=p_retro_serialize_size();if(!z)return JNI_FALSE;std::vector<uint8_t>s(z);if(!p_retro_serialize(s.data(),z))return JNI_FALSE;const char*p=e->GetStringUTFChars(path,nullptr);std::ofstream o(p,std::ios::binary|std::ios::trunc);e->ReleaseStringUTFChars(path,p);if(!o)return JNI_FALSE;o.write((const char*)s.data(),s.size());return o.good()?JNI_TRUE:JNI_FALSE;}
-extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadState(JNIEnv*e,jobject,jstring path){if(!p_retro_unserialize)return JNI_FALSE;if(hwEnabled)makeHwCurrent();const char*p=e->GetStringUTFChars(path,nullptr);std::ifstream in(p,std::ios::binary|std::ios::ate);e->ReleaseStringUTFChars(path,p);if(!in)return JNI_FALSE;auto z=in.tellg();if(z<=0)return JNI_FALSE;in.seekg(0);std::vector<uint8_t>s((size_t)z);if(!in.read((char*)s.data(),z))return JNI_FALSE;audioBuffer.clear();return p_retro_unserialize(s.data(),s.size())?JNI_TRUE:JNI_FALSE;}
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setButton(JNIEnv*,jobject,jint id,jboolean p){if(id>=0&&id<16)buttons[id]=p;}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setAnalog(JNIEnv*,jobject,jint x,jint y){analogX=(int16_t)std::max(-32767,std::min(32767,(int)x));analogY=(int16_t)std::max(-32767,std::min(32767,(int)y));}extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_reset(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_reset)p_retro_reset();}
-extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_unload_game)p_retro_unload_game();destroyHw();if(p_retro_deinit)p_retro_deinit();if(core)dlclose(core);core=nullptr;isPpsspp=false;isDolphin=false;shutdownRequested=false;frame.clear();rgbaScratch.clear();audioBuffer.clear();std::fill(std::begin(buttons),std::end(buttons),false);analogX=analogY=0;p_retro_set_controller_port_device=nullptr;}
+static void* core=nullptr; static std::string systemDir,saveDir,runtimeLogPath; static int pixelFormat=RETRO_PIXEL_FORMAT_0RGB1555; static unsigned frameW=240,frameH=160; static int sampleRate=44100; static std::vector<uint32_t> frame,rgbaScratch; static std::vector<int16_t> audioBuffer; static bool buttons[16]={}; static int16_t analogX=0,analogY=0; static bool isPpsspp=false,isDolphin=false,shutdownRequested=false,firstRun=true,firstCapture=true;
+static void traceLine(const char*msg){LOGE("TRACE %s",msg?msg:"(null)");if(runtimeLogPath.empty())return;std::ofstream o(runtimeLogPath,std::ios::app);if(o){o<<(long long)std::time(nullptr)<<" "<<(msg?msg:"(null)")<<"\n";o.flush();}}
+static EGLDisplay eglDisplay=EGL_NO_DISPLAY; static EGLContext eglContext=EGL_NO_CONTEXT; static EGLSurface eglSurface=EGL_NO_SURFACE; static bool hwEnabled=false,hwResetCalled=false,hwBottomLeft=true; static void(*hwContextReset)()=nullptr; static void(*hwContextDestroy)()=nullptr;
+static void(*p_retro_init)()=nullptr; static void(*p_retro_deinit)()=nullptr; static void(*p_retro_set_environment)(retro_environment_t)=nullptr; static void(*p_retro_set_video_refresh)(retro_video_refresh_t)=nullptr; static void(*p_retro_set_audio_sample)(retro_audio_sample_t)=nullptr; static void(*p_retro_set_audio_sample_batch)(retro_audio_sample_batch_t)=nullptr; static void(*p_retro_set_input_poll)(retro_input_poll_t)=nullptr; static void(*p_retro_set_input_state)(retro_input_state_t)=nullptr; static void(*p_retro_set_controller_port_device)(unsigned,unsigned)=nullptr; static bool(*p_retro_load_game)(const retro_game_info*)=nullptr; static void(*p_retro_unload_game)()=nullptr; static void(*p_retro_run)()=nullptr; static void(*p_retro_reset)()=nullptr; static void(*p_retro_get_system_av_info)(retro_system_av_info*)=nullptr; static size_t(*p_retro_serialize_size)()=nullptr; static bool(*p_retro_serialize)(void*,size_t)=nullptr; static bool(*p_retro_unserialize)(const void*,size_t)=nullptr;
+static void coreLog(int level,const char*fmt,...){va_list ap;va_start(ap,fmt);__android_log_vprint(level>=3?ANDROID_LOG_ERROR:ANDROID_LOG_INFO,"LibretroCore",fmt,ap);va_end(ap);}
+static bool makeHwCurrent(){return hwEnabled&&eglDisplay!=EGL_NO_DISPLAY&&eglSurface!=EGL_NO_SURFACE&&eglContext!=EGL_NO_CONTEXT&&eglMakeCurrent(eglDisplay,eglSurface,eglSurface,eglContext)==EGL_TRUE;} static void releaseHwCurrent(){if(eglDisplay!=EGL_NO_DISPLAY)eglMakeCurrent(eglDisplay,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);} static uintptr_t hwFramebuffer(){return 0;} static void*hwProc(const char*n){if(!n)return nullptr;void*p=(void*)eglGetProcAddress(n);if(!p)p=dlsym(RTLD_DEFAULT,n);return p;}
+static void destroyHw(){if(eglDisplay!=EGL_NO_DISPLAY){if(eglContext!=EGL_NO_CONTEXT&&hwContextDestroy&&hwResetCalled&&makeHwCurrent())hwContextDestroy();releaseHwCurrent();if(eglContext!=EGL_NO_CONTEXT)eglDestroyContext(eglDisplay,eglContext);if(eglSurface!=EGL_NO_SURFACE)eglDestroySurface(eglDisplay,eglSurface);eglTerminate(eglDisplay);}eglDisplay=EGL_NO_DISPLAY;eglContext=EGL_NO_CONTEXT;eglSurface=EGL_NO_SURFACE;hwEnabled=false;hwResetCalled=false;hwContextReset=nullptr;hwContextDestroy=nullptr;}
+static bool createHw(retro_hw_render_callback*cb){if(!cb)return false;{char b[160];std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0);traceLine(b);}if(cb->context_type!=RETRO_HW_CONTEXT_OPENGLES2&&cb->context_type!=RETRO_HW_CONTEXT_OPENGLES3&&cb->context_type!=RETRO_HW_CONTEXT_OPENGLES_VERSION){traceLine("hw: unsupported context type");return false;}destroyHw();eglDisplay=eglGetDisplay(EGL_DEFAULT_DISPLAY);if(eglDisplay==EGL_NO_DISPLAY||!eglInitialize(eglDisplay,nullptr,nullptr)){traceLine("hw: eglInitialize failed");destroyHw();return false;}EGLint renderable=EGL_OPENGL_ES2_BIT|0x0040;const EGLint ca[]={EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,renderable,EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,cb->depth?24:0,EGL_STENCIL_SIZE,cb->stencil?8:0,EGL_NONE};EGLConfig cfg=nullptr;EGLint count=0;if(!eglChooseConfig(eglDisplay,ca,&cfg,1,&count)||count<1){traceLine("hw: eglChooseConfig failed");destroyHw();return false;}const EGLint pa[]={EGL_WIDTH,1024,EGL_HEIGHT,1024,EGL_NONE};eglSurface=eglCreatePbufferSurface(eglDisplay,cfg,pa);if(eglSurface==EGL_NO_SURFACE){traceLine("hw: pbuffer failed");destroyHw();return false;}unsigned major=cb->version_major;if(cb->context_type==RETRO_HW_CONTEXT_OPENGLES3&&major<3)major=3;if(major<2)major=2;eglBindAPI(EGL_OPENGL_ES_API);const EGLint xa[]={EGL_CONTEXT_CLIENT_VERSION,(EGLint)major,EGL_NONE};eglContext=eglCreateContext(eglDisplay,cfg,EGL_NO_CONTEXT,xa);if(eglContext==EGL_NO_CONTEXT){traceLine("hw: context create failed");destroyHw();return false;}hwEnabled=true;hwBottomLeft=cb->bottom_left_origin;hwContextReset=cb->context_reset;hwContextDestroy=cb->context_destroy;cb->get_current_framebuffer=hwFramebuffer;cb->get_proc_address=hwProc;if(!makeHwCurrent()){traceLine("hw: make current failed");destroyHw();return false;}glViewport(0,0,1024,1024);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);glFinish();releaseHwCurrent();traceLine("hw: EGL context registered");return true;}
+static const char*dolphinOption(const char*k){if(!k)return nullptr;if(!strcmp(k,"dolphin_cpu_core"))return "JITARM64";if(!strcmp(k,"dolphin_cpu_clock_rate"))return "100%";if(!strcmp(k,"dolphin_fastmem"))return "enabled";if(!strcmp(k,"dolphin_dsp_hle"))return "enabled";if(!strcmp(k,"dolphin_dsp_jit"))return "enabled";if(!strcmp(k,"dolphin_emulation_speed"))return "100%";if(!strcmp(k,"dolphin_widescreen"))return "disabled";if(!strcmp(k,"dolphin_progressive_scan"))return "enabled";if(!strcmp(k,"dolphin_pal60"))return "enabled";if(!strcmp(k,"dolphin_enable_rumble"))return "enabled";if(!strcmp(k,"dolphin_wiimote_continuous_scanning"))return "disabled";if(!strcmp(k,"dolphin_cheats_enabled"))return "disabled";if(!strcmp(k,"dolphin_osd_enabled"))return "enabled";if(!strcmp(k,"dolphin_log_level"))return "Error";return nullptr;}
+static const char*ppssppOption(const char*k){if(!k)return nullptr;if(!strcmp(k,"ppsspp_backend"))return "opengl";if(!strcmp(k,"ppsspp_rendering_mode"))return "OpenGL";if(!strcmp(k,"ppsspp_internal_resolution"))return "960x544";if(!strcmp(k,"ppsspp_cpu_core"))return "JIT";if(!strcmp(k,"ppsspp_fast_memory"))return "enabled";if(!strcmp(k,"ppsspp_io_timing_method"))return "Fast";if(!strcmp(k,"ppsspp_frameskip"))return "1";if(!strcmp(k,"ppsspp_auto_frameskip"))return "enabled";return nullptr;}
+static bool envCb(unsigned cmd,void*data){switch(cmd){case ENV_GET_CAN_DUPE:*reinterpret_cast<bool*>(data)=true;return true;case ENV_GET_OVERSCAN:*reinterpret_cast<bool*>(data)=false;return true;case ENV_SHUTDOWN:shutdownRequested=true;traceLine("env: shutdown requested");return true;case ENV_GET_SYSTEM_DIRECTORY:*reinterpret_cast<const char**>(data)=systemDir.c_str();return true;case ENV_GET_SAVE_DIRECTORY:*reinterpret_cast<const char**>(data)=saveDir.c_str();return true;case ENV_SET_PIXEL_FORMAT:pixelFormat=*reinterpret_cast<const int*>(data);return true;case ENV_GET_VARIABLE_UPDATE:*reinterpret_cast<bool*>(data)=false;return true;case ENV_GET_VARIABLE:{auto*v=reinterpret_cast<retro_variable*>(data);if(!v)return false;v->value=isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr);return v->value!=nullptr;}case ENV_GET_LOG_INTERFACE:{auto*l=reinterpret_cast<retro_log_callback*>(data);l->log=coreLog;return true;}case ENV_GET_LANGUAGE:*reinterpret_cast<unsigned*>(data)=0;return true;case ENV_GET_INPUT_BITMASKS:return true;case ENV_GET_PREFERRED_HW_RENDER:*reinterpret_cast<unsigned*>(data)=RETRO_HW_CONTEXT_OPENGLES3;return true;case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;case ENV_SET_SYSTEM_AV_INFO:{auto*av=reinterpret_cast<retro_system_av_info*>(data);if(av){frameW=av->geometry.base_width;frameH=av->geometry.base_height;sampleRate=(int)(av->timing.sample_rate>0?av->timing.sample_rate:44100);}return true;}case ENV_SET_GEOMETRY:{auto*g=reinterpret_cast<retro_game_geometry*>(data);if(g){frameW=g->base_width;frameH=g->base_height;}return true;}case ENV_SET_VARIABLES:case ENV_SET_INPUT_DESCRIPTORS:case ENV_SET_SUPPORT_NO_GAME:case ENV_SET_ROTATION:case ENV_SET_MESSAGE:case ENV_SET_PERFORMANCE_LEVEL:case ENV_SET_CONTROLLER_INFO:case ENV_SET_MEMORY_MAPS:return true;default:return false;}}
+static void captureHw(unsigned w,unsigned h){if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}if(!w||!h||w>1024||h>1024)return;frameW=w;frameH=h;size_t n=(size_t)w*h;rgbaScratch.resize(n);frame.resize(n);GLint old=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&old);glBindFramebuffer(GL_FRAMEBUFFER,0);glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,rgbaScratch.data());glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)old);for(unsigned y=0;y<h;y++){unsigned sy=hwBottomLeft?h-1-y:y;for(unsigned x=0;x<w;x++){uint32_t p=rgbaScratch[(size_t)sy*w+x];frame[(size_t)y*w+x]=0xFF000000u|((p&255)<<16)|(p&0xFF00)|((p>>16)&255);}}}
+static void videoCb(const void*d,unsigned w,unsigned h,size_t pitch){if(d==(const void*)-1){captureHw(w,h);return;}if(!d)return;frameW=w;frameH=h;frame.resize((size_t)w*h);for(unsigned y=0;y<h;y++){const uint8_t*r=(const uint8_t*)d+y*pitch;for(unsigned x=0;x<w;x++){uint32_t a=0xFF000000u;if(pixelFormat==RETRO_PIXEL_FORMAT_XRGB8888){a|=((const uint32_t*)r)[x]&0xFFFFFF;}else if(pixelFormat==RETRO_PIXEL_FORMAT_RGB565){uint16_t p=((const uint16_t*)r)[x];a|=(((p>>11)&31)*255/31<<16)|(((p>>5)&63)*255/63<<8)|((p&31)*255/31);}frame[(size_t)y*w+x]=a;}}}
+static void audioCb(int16_t l,int16_t r){audioBuffer.push_back(l);audioBuffer.push_back(r);} static size_t audioBatchCb(const int16_t*d,size_t n){if(d&&n)audioBuffer.insert(audioBuffer.end(),d,d+n*2);return n;} static void inputPollCb(){} static int16_t inputStateCb(unsigned port,unsigned dev,unsigned idx,unsigned id){if(port)return 0;if(dev==RETRO_DEVICE_JOYPAD&&idx==0){if(id==RETRO_DEVICE_ID_JOYPAD_MASK){uint16_t m=0;for(unsigned i=0;i<16;i++)if(buttons[i])m|=1u<<i;return(int16_t)m;}if(id<16)return buttons[id]?1:0;}if(dev==RETRO_DEVICE_ANALOG&&idx==0){if(id==0)return analogX;if(id==1)return analogY;}return 0;}
+template<typename T>static bool sym(T&o,const char*n){o=reinterpret_cast<T>(dlsym(core,n));return o!=nullptr;}template<typename T>static void opt(T&o,const char*n){o=reinterpret_cast<T>(dlsym(core,n));}
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setLogPath(JNIEnv*e,jobject,jstring path){const char*p=e->GetStringUTFChars(path,nullptr);runtimeLogPath=p?p:"";e->ReleaseStringUTFChars(path,p);if(!runtimeLogPath.empty()){std::ofstream o(runtimeLogPath,std::ios::trunc);if(o)o<<"EMU HUB CORE TRACE\n";}}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init(JNIEnv*e,jobject,jstring c,jstring s,jstring v){shutdownRequested=false;firstRun=true;firstCapture=true;const char*cp=e->GetStringUTFChars(c,nullptr),*sp=e->GetStringUTFChars(s,nullptr),*sv=e->GetStringUTFChars(v,nullptr);isPpsspp=strstr(cp,"ppsspp")!=nullptr;isDolphin=strstr(cp,"dolphin")!=nullptr;systemDir=sp;saveDir=sv;traceLine(isDolphin?"init: dolphin detected":"init: non-dolphin core");traceLine("init: before dlopen");core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);e->ReleaseStringUTFChars(c,cp);e->ReleaseStringUTFChars(s,sp);e->ReleaseStringUTFChars(v,sv);if(!core){traceLine("init: dlopen failed");return JNI_FALSE;}traceLine("init: dlopen ok");if(!sym(p_retro_init,"retro_init")||!sym(p_retro_deinit,"retro_deinit")||!sym(p_retro_set_environment,"retro_set_environment")||!sym(p_retro_set_video_refresh,"retro_set_video_refresh")||!sym(p_retro_set_audio_sample,"retro_set_audio_sample")||!sym(p_retro_set_audio_sample_batch,"retro_set_audio_sample_batch")||!sym(p_retro_set_input_poll,"retro_set_input_poll")||!sym(p_retro_set_input_state,"retro_set_input_state")||!sym(p_retro_load_game,"retro_load_game")||!sym(p_retro_unload_game,"retro_unload_game")||!sym(p_retro_run,"retro_run")||!sym(p_retro_reset,"retro_reset")||!sym(p_retro_get_system_av_info,"retro_get_system_av_info"))return JNI_FALSE;opt(p_retro_set_controller_port_device,"retro_set_controller_port_device");opt(p_retro_serialize_size,"retro_serialize_size");opt(p_retro_serialize,"retro_serialize");opt(p_retro_unserialize,"retro_unserialize");p_retro_set_environment(envCb);p_retro_set_video_refresh(videoCb);p_retro_set_audio_sample(audioCb);p_retro_set_audio_sample_batch(audioBatchCb);p_retro_set_input_poll(inputPollCb);p_retro_set_input_state(inputStateCb);traceLine("init: before retro_init");p_retro_init();traceLine("init: retro_init ok");traceLine("init: controller device deferred");traceLine("init: complete");return JNI_TRUE;}
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setControllerDevice(JNIEnv*,jobject,jint device){if(p_retro_set_controller_port_device){traceLine("controller: explicit device set");p_retro_set_controller_port_device(0,device==RETRO_DEVICE_ANALOG?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);}}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){traceLine("loadGame: enter");const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};traceLine("loadGame: before retro_load_game");bool ok=p_retro_load_game&&p_retro_load_game(&info);traceLine(ok?"loadGame: retro_load_game ok":"loadGame: retro_load_game failed");e->ReleaseStringUTFChars(path,p);if(!ok)return JNI_FALSE;if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glFinish();}if(p_retro_set_controller_port_device){traceLine("loadGame: before controller device");p_retro_set_controller_port_device(0,isDolphin?RETRO_DEVICE_JOYPAD:(isPpsspp?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD));traceLine("loadGame: controller device ok");}if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();}if(hwEnabled)releaseHwCurrent();traceLine("loadGame: complete");return JNI_TRUE;}
+extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_runFrame(JNIEnv*e,jobject,jintArray p){if(shutdownRequested)return-2;if(!p_retro_run)return-1;if(hwEnabled){if(!hwResetCalled)return-4;if(!makeHwCurrent())return-3;}if(firstRun)traceLine("runFrame: before first retro_run");p_retro_run();if(firstRun){traceLine("runFrame: first retro_run ok");firstRun=false;}jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,c,(const jint*)frame.data());return(jint)c;}
+extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getWidth(JNIEnv*,jobject){return frameW;} extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getHeight(JNIEnv*,jobject){return frameH;} extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getSampleRate(JNIEnv*,jobject){return sampleRate;} extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudio(JNIEnv*e,jobject,jshortArray out){if(!out||audioBuffer.empty())return 0;size_t c=std::min((size_t)e->GetArrayLength(out),audioBuffer.size());e->SetShortArrayRegion(out,0,c,(const jshort*)audioBuffer.data());audioBuffer.erase(audioBuffer.begin(),audioBuffer.begin()+c);return(jint)c;}
+extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_saveState(JNIEnv*,jobject,jstring){return JNI_FALSE;} extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadState(JNIEnv*,jobject,jstring){return JNI_FALSE;} extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setButton(JNIEnv*,jobject,jint id,jboolean p){if(id>=0&&id<16)buttons[id]=p;} extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setAnalog(JNIEnv*,jobject,jint x,jint y){analogX=(int16_t)std::max(-32767,std::min(32767,(int)x));analogY=(int16_t)std::max(-32767,std::min(32767,(int)y));} extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_reset(JNIEnv*,jobject){if(p_retro_reset)p_retro_reset();} extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_unload(JNIEnv*,jobject){if(hwEnabled)makeHwCurrent();if(p_retro_unload_game)p_retro_unload_game();destroyHw();if(p_retro_deinit)p_retro_deinit();if(core)dlclose(core);core=nullptr;isPpsspp=isDolphin=shutdownRequested=false;frame.clear();rgbaScratch.clear();audioBuffer.clear();p_retro_set_controller_port_device=nullptr;}
