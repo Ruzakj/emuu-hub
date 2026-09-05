@@ -42,6 +42,15 @@ class EmuHubApp : Application() {
             Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
         }
 
+        val coreTrace = getSharedPreferences("core_runtime_trace", MODE_PRIVATE)
+        if (coreTrace.getBoolean("active", false) && isMainProcess) {
+            val stage = coreTrace.getString("stage", "unknown") ?: "unknown"
+            val coreId = coreTrace.getString("core", "unknown") ?: "unknown"
+            val game = coreTrace.getString("game", "unknown") ?: "unknown"
+            coreTrace.edit().putBoolean("active", false).putString("last_crash_stage", stage).apply()
+            Toast.makeText(this, "Core crash: $coreId • $stage • $game. Log: emu-hub/CORE/core-runtime.log", Toast.LENGTH_LONG).show()
+        }
+
         installJ2meCrashHandler()
         if (isMainProcess || isJ2meProcess) recoverJ2meCrashTrace()
 

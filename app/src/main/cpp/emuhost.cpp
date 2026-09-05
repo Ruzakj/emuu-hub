@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <iterator>
 #include <cstdarg>
+#include <ctime>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "EmuHost", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "EmuHost", __VA_ARGS__)
@@ -81,6 +82,17 @@ static int16_t analogX=0,analogY=0;
 static bool isPpsspp=false;
 static bool isDolphin=false;
 static bool shutdownRequested=false;
+static std::string runtimeLogPath;
+
+static void traceLine(const char* msg){
+    LOGE("TRACE %s",msg?msg:"(null)");
+    if(runtimeLogPath.empty())return;
+    std::ofstream o(runtimeLogPath,std::ios::app);
+    if(!o)return;
+    std::time_t now=std::time(nullptr);
+    o << (long long)now << " " << (msg?msg:"(null)") << "\n";
+    o.flush();
+}
 
 static EGLDisplay eglDisplay=EGL_NO_DISPLAY;
 static EGLContext eglContext=EGL_NO_CONTEXT;
@@ -260,23 +272,28 @@ static int16_t inputStateCb(unsigned port,unsigned device,unsigned index,unsigne
 
 template<typename T>static bool sym(T&out,const char*n){out=reinterpret_cast<T>(dlsym(core,n));if(!out){LOGE("Missing symbol %s",n);return false;}return true;}template<typename T>static void opt(T&out,const char*n){out=reinterpret_cast<T>(dlsym(core,n));}
 
+extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setLogPath(JNIEnv*e,jobject,jstring path){ const char*p=e->GetStringUTFChars(path,nullptr); runtimeLogPath=p?p:""; e->ReleaseStringUTFChars(path,p); if(!runtimeLogPath.empty()){ std::ofstream o(runtimeLogPath,std::ios::trunc); if(o){o<<"EMU HUB CORE TRACE\n";o.flush();} } }
+
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init(JNIEnv*e,jobject,jstring c,jstring s,jstring v){
     shutdownRequested=false;
     const char*cp=e->GetStringUTFChars(c,nullptr),*sp=e->GetStringUTFChars(s,nullptr),*sv=e->GetStringUTFChars(v,nullptr);
-    isPpsspp=std::strstr(cp,"ppsspp")!=nullptr;const bool wantsAnalog=std::strstr(cp,"pcsx")!=nullptr;systemDir=sp;saveDir=sv;core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);
-    e->ReleaseStringUTFChars(c,cp);e->ReleaseStringUTFChars(s,sp);e->ReleaseStringUTFChars(v,sv);if(!core){LOGE("dlopen: %s",dlerror());return JNI_FALSE;}
+    isPpsspp=std::strstr(cp,"ppsspp")!=nullptr;isDolphin=std::strstr(cp,"dolphin")!=nullptr;const bool wantsAnalog=std::strstr(cp,"pcsx")!=nullptr||isDolphin;systemDir=sp;saveDir=sv;traceLine(isDolphin?"init: dolphin detected":"init: non-dolphin core");traceLine("init: before dlopen");core=dlopen(cp,RTLD_NOW|RTLD_LOCAL);
+    e->ReleaseStringUTFChars(c,cp);e->ReleaseStringUTFChars(s,sp);e->ReleaseStringUTFChars(v,sv);if(!core){LOGE("dlopen: %s",dlerror());traceLine("init: dlopen failed");return JNI_FALSE;}traceLine("init: dlopen ok");
     if(!sym(p_retro_init,"retro_init")||!sym(p_retro_deinit,"retro_deinit")||!sym(p_retro_set_environment,"retro_set_environment")||!sym(p_retro_set_video_refresh,"retro_set_video_refresh")||!sym(p_retro_set_audio_sample,"retro_set_audio_sample")||!sym(p_retro_set_audio_sample_batch,"retro_set_audio_sample_batch")||!sym(p_retro_set_input_poll,"retro_set_input_poll")||!sym(p_retro_set_input_state,"retro_set_input_state")||!sym(p_retro_load_game,"retro_load_game")||!sym(p_retro_unload_game,"retro_unload_game")||!sym(p_retro_run,"retro_run")||!sym(p_retro_reset,"retro_reset")||!sym(p_retro_get_system_av_info,"retro_get_system_av_info"))return JNI_FALSE;
     opt(p_retro_set_controller_port_device,"retro_set_controller_port_device");opt(p_retro_serialize_size,"retro_serialize_size");opt(p_retro_serialize,"retro_serialize");opt(p_retro_unserialize,"retro_unserialize");
     p_retro_set_environment(envCb);p_retro_set_video_refresh(videoCb);p_retro_set_audio_sample(audioCb);p_retro_set_audio_sample_batch(audioBatchCb);p_retro_set_input_poll(inputPollCb);p_retro_set_input_state(inputStateCb);
+    traceLine("init: before retro_init");
     p_retro_init();
+    traceLine("init: retro_init ok");
     if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}
     if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
-    LOGI("Core initialized: ppsspp=%d hw=%d reset=%d",isPpsspp?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
+    traceLine("init: complete");
+    LOGI("Core initialized: ppsspp=%d dolphin=%d hw=%d reset=%d",isPpsspp?1:0,isDolphin?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setControllerDevice(JNIEnv*,jobject,jint device){if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,device==RETRO_DEVICE_ANALOG?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);}
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){
-    const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};bool ok=p_retro_load_game&&p_retro_load_game(&info);e->ReleaseStringUTFChars(path,p);
+    traceLine("loadGame: enter");const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};traceLine("loadGame: before retro_load_game");bool ok=p_retro_load_game&&p_retro_load_game(&info);traceLine(ok?"loadGame: retro_load_game ok":"loadGame: retro_load_game failed");e->ReleaseStringUTFChars(path,p);
     if(!ok){LOGE("retro_load_game failed");if(hwEnabled)releaseHwCurrent();return JNI_FALSE;}
     if(hwEnabled&&!hwResetCalled){if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}LOGI("Calling PPSSPP context_reset after retro_load_game");hwContextReset();hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");}
     if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d reset=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0,hwResetCalled?1:0);}
@@ -285,7 +302,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_load
 extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_runFrame(JNIEnv*e,jobject,jintArray p){
     if(shutdownRequested)return -2;if(!p_retro_run)return -1;
     if(hwEnabled){if(!hwResetCalled){LOGE("Blocked retro_run: HW context was never reset");return -4;}if(!makeHwCurrent()){LOGE("EmuFrame-Z9x failed to acquire EGL: 0x%x",eglGetError());return -3;}}
-    p_retro_run();if(shutdownRequested)return -2;
+    static bool firstRun=true;if(firstRun){traceLine("runFrame: before first retro_run");}p_retro_run();if(firstRun){traceLine("runFrame: first retro_run ok");firstRun=false;}if(shutdownRequested)return -2;
     jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,(jsize)c,(const jint*)frame.data());return(jint)c;
 }
 extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getWidth(JNIEnv*,jobject){return frameW;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getHeight(JNIEnv*,jobject){return frameH;}extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_getSampleRate(JNIEnv*,jobject){return sampleRate;}

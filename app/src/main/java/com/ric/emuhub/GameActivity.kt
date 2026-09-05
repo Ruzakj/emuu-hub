@@ -34,6 +34,8 @@ class GameActivity : Activity() {
     private lateinit var stateFile: File
     private lateinit var gameProfile: GameProfile
     private var cleanedUp = false
+    private lateinit var coreTraceFile: File
+    private val coreTracePrefs by lazy { getSharedPreferences("core_runtime_trace", MODE_PRIVATE) }
 
     data class GameProfile(val id:String,val label:String,val audioBufferScale:Int,val priority:Int,val videoFilter:Boolean)
 
@@ -48,6 +50,9 @@ class GameActivity : Activity() {
         }
         val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; "dolphin" -> "Dolphin Core"; else -> "mGBA" }
         val systemRoot = StoragePaths.systemDir(this)
+        coreTraceFile = File(StoragePaths.root(this), "CORE/core-runtime.log").apply { parentFile?.mkdirs() }
+        NativeBridge.setLogPath(coreTraceFile.absolutePath)
+        traceCoreStage("prepare", coreId, romName)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
         if (coreId == "dolphin") installDolphinAssets(systemRoot)
         val saveDir = StoragePaths.savesDir(this)
@@ -58,15 +63,24 @@ class GameActivity : Activity() {
             showLoadError("$coreLabel engine belum siap. Engine Pack sedang disiapkan; coba lagi setelah selesai.")
             return
         }
-        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { showLoadError("$coreLabel core gagal inisialisasi."); return }
+        traceCoreStage("native_init", coreId, romName)
+        if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }
+        traceCoreStage("native_init_ok", coreId, romName)
         if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)
-        if (!NativeBridge.loadGame(rom)) { showLoadError("$coreLabel gagal memuat ${File(rom).name}."); return }
+        traceCoreStage("load_game", coreId, romName)
+        if (!NativeBridge.loadGame(rom)) { traceCoreStage("load_game_failed", coreId, romName, false); showLoadError("$coreLabel gagal memuat ${File(rom).name}. Log: emu-hub/CORE/core-runtime.log"); return }
+        traceCoreStage("load_game_ok", coreId, romName)
         val root = FrameLayout(this).apply { setBackgroundColor(0xFF050507.toInt()) }
         gameView = GameView(coreId, gameProfile).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         root.addView(buildGamepadOverlay(coreId), FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
         enableSafeFullscreen()
         gameView?.start()
+    }
+
+    private fun traceCoreStage(stage:String,coreId:String,romName:String,active:Boolean=true){
+        coreTracePrefs.edit().putBoolean("active",active).putString("stage",stage).putString("core",coreId).putString("game",romName).putLong("time",System.currentTimeMillis()).commit()
+        runCatching { coreTraceFile.parentFile?.mkdirs(); coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} stage=$stage core=$coreId game=$romName\n") }
     }
 
     private fun resolveGameProfile(coreId:String,romName:String):GameProfile{
@@ -89,7 +103,7 @@ class GameActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) enableSafeFullscreen() }
     @Deprecated("Framework compatibility") override fun onBackPressed() { shutdownCore(); finish() }
-    private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload() }
+    private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload(); if(::coreTraceFile.isInitialized) coreTracePrefs.edit().putBoolean("active",false).putString("stage","clean_exit").apply() }
     private fun showLoadError(message:String){setContentView(TextView(this).apply{text=message;gravity=Gravity.CENTER;textSize=18f;setTextColor(0xFFFFFFFF.toInt());setBackgroundColor(0xFF050507.toInt());setPadding(dp(24),dp(24),dp(24),dp(24))})}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun translucentBackground(alpha:Int=120,stroke:Boolean=true,radiusDp:Int=18)=GradientDrawable().apply{shape=GradientDrawable.RECTANGLE;cornerRadius=dp(radiusDp).toFloat();setColor((alpha shl 24) or 0x00202024);if(stroke)setStroke(dp(1),0x55FFFFFF)}
