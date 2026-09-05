@@ -1,0 +1,61 @@
+name: Patch Dolphin Controller Performance
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-controller-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fix Wii controller and performance defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cpp=Path('app/src/main/cpp/emuhost.cpp')
+          s=cpp.read_text()
+          s=s.replace('if(!strcmp(k,"dolphin_cpu_clock_rate"))return "85%";','if(!strcmp(k,"dolphin_cpu_clock_rate"))return "100%";',1)
+          s=s.replace('if(!strcmp(k,"dolphin_osd_enabled"))return "enabled";','if(!strcmp(k,"dolphin_osd_enabled"))return "disabled";',1)
+          if 'dolphin_renderer' not in s:
+              s=s.replace('if(!strcmp(k,"dolphin_internal_resolution"))return "1x Native (640x528)";',
+                          'if(!strcmp(k,"dolphin_internal_resolution"))return "1x Native (640x528)";if(!strcmp(k,"dolphin_renderer"))return "Hardware";if(!strcmp(k,"dolphin_bbox_enabled"))return "disabled";if(!strcmp(k,"dolphin_efb_to_vram"))return "disabled";if(!strcmp(k,"dolphin_mixer_rate"))return "32000";',1)
+          old='p_retro_set_controller_port_device(0,isDolphin?RETRO_DEVICE_JOYPAD:(isPpsspp?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD));'
+          new='p_retro_set_controller_port_device(0,isDolphin?0x401u:(isPpsspp?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD));'
+          if old not in s:
+              raise SystemExit('controller anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace('traceLine("loadGame: before controller device");', 'traceLine(isDolphin?"loadGame: attach Wii Classic Controller 0x401":"loadGame: before controller device");',1)
+          cpp.write_text(s)
+
+          kt=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          k=kt.read_text()
+          k=k.replace('coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)',
+                      'coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",1,Process.THREAD_PRIORITY_URGENT_DISPLAY,false)',1)
+          kt.write_text(k)
+          PY
+          git diff --check
+          grep -q '0x401u' app/src/main/cpp/emuhost.cpp
+          grep -q 'dolphin_cpu_clock_rate.*100%' app/src/main/cpp/emuhost.cpp
+          grep -q 'dolphin_mixer_rate.*32000' app/src/main/cpp/emuhost.cpp
+
+      - name: Commit Wii controller and performance fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Fix Wii Classic Controller and Dolphin performance defaults'
+          git push origin main
