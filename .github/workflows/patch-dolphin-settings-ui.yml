@@ -1,0 +1,40 @@
+name: Wire Dolphin Settings UI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-settings-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch MainActivity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s=p.read_text()
+          old='nav.addView(consoleNav("⚙","PS2","Tuning") { startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))'
+          new='nav.addView(consoleNav("⚙","PS2","Tuning") { startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))\n        nav.addView(consoleNav("◈","GC/WII","Dolphin") { startActivity(Intent(this@MainActivity,DolphinSettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))'
+          if old not in s:
+              raise SystemExit('PS2 nav anchor not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Add GameCube Wii settings shortcut"
+          git push
