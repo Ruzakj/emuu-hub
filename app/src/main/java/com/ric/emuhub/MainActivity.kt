@@ -158,6 +158,7 @@ class MainActivity : Activity() {
         val nav=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(5),dp(5),dp(5),dp(5));background=rounded(0xFF090D13.toInt(),20,0xFF1D2632.toInt())}
         nav.addView(consoleNav("↻","SCAN","Library") { refreshAllFolders(true) },LinearLayout.LayoutParams(0,dp(64),1f))
         nav.addView(consoleNav("⚙","PS2","Tuning") { startActivity(Intent(this@MainActivity,Ps2SettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))
+        nav.addView(consoleNav("◈","GC/WII","Dolphin") { startActivity(Intent(this@MainActivity,DolphinSettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))
         nav.addView(consoleNav("⇩","UPDATE","System") { startActivity(Intent(this@MainActivity,UpdateActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))
         content.addView(nav,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(74)).apply{topMargin=dp(11)})
 
