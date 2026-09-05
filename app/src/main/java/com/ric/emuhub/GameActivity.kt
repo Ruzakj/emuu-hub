@@ -49,6 +49,7 @@ class GameActivity : Activity() {
         val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; "dolphin" -> "Dolphin Core"; else -> "mGBA" }
         val systemRoot = StoragePaths.systemDir(this)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
+        if (coreId == "dolphin") installDolphinAssets(systemRoot)
         val saveDir = StoragePaths.savesDir(this)
         stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")
         val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")
@@ -113,6 +114,15 @@ class GameActivity : Activity() {
 
     inner class AnalogStickView:View(this@GameActivity){private val basePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x552A2A30};private val ringPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x66FFFFFF;style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()};private val knobPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xAA5A5A62.toInt()};private var knobX=0f;private var knobY=0f;override fun onDraw(canvas:Canvas){val cx=width/2f;val cy=height/2f;val outer=min(width,height)*.44f;val knob=outer*.42f;canvas.drawCircle(cx,cy,outer,basePaint);canvas.drawCircle(cx,cy,outer,ringPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,ringPaint)};override fun onTouchEvent(e:MotionEvent):Boolean{val cx=width/2f;val cy=height/2f;val max=min(width,height)*.34f;when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{var dx=e.x-cx;var dy=e.y-cy;val d=sqrt(dx*dx+dy*dy);if(d>max&&d>0f){dx=dx/d*max;dy=dy/d*max};knobX=dx;knobY=dy;NativeBridge.setAnalog(((dx/max)*32767).toInt(),((dy/max)*32767).toInt());invalidate()};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{knobX=0f;knobY=0f;NativeBridge.setAnalog(0,0);invalidate()}};return true}}
     inner class DPadView:View(this@GameActivity){private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x8838383F.toInt()};private val textPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xDDFFFFFF.toInt();textSize=dp(24).toFloat();textAlign=Paint.Align.CENTER};private var activeId=-1;override fun onDraw(c:Canvas){val w=width/3f;val h=height/3f;c.drawRoundRect(w,0f,2*w,height.toFloat(),dp(8).toFloat(),dp(8).toFloat(),paint);c.drawRoundRect(0f,h,width.toFloat(),2*h,dp(8).toFloat(),dp(8).toFloat(),paint);c.drawText("↑",width/2f,h*.72f,textPaint);c.drawText("↓",width/2f,h*2.78f,textPaint);c.drawText("←",w*.5f,height/2f+textPaint.textSize/3,textPaint);c.drawText("→",w*2.5f,height/2f+textPaint.textSize/3,textPaint)};private fun idAt(x:Float,y:Float):Int{val dx=x-width/2f;val dy=y-height/2f;return if(kotlin.math.abs(dx)>kotlin.math.abs(dy)){if(dx<0)6 else 7}else{if(dy<0)4 else 5}};override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{val id=idAt(e.x,e.y);if(id!=activeId){if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=id;NativeBridge.setButton(id,true)}};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=-1}};return true}}
+
+    private fun installDolphinAssets(root:File){
+        val target=File(root,"dolphin-emu/Sys")
+        val marker=File(target,".emuhub_dolphin_sys_v1")
+        if(marker.exists())return
+        target.mkdirs()
+        copyAssetTree("Dolphin/Sys",target)
+        if(File(target,"GC/font_ansi.bin").isFile) runCatching{marker.writeText("1")}
+    }
 
     private fun installPpssppAssets(root:File){
         val target=File(root,"PPSSPP")
