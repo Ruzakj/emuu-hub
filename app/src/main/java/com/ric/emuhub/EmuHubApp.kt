@@ -1,7 +1,6 @@
 package com.ric.emuhub
 
 import android.app.ActivityManager
-import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.os.Process
@@ -12,8 +11,9 @@ import java.io.StringWriter
 import javax.microedition.util.ContextHolder
 import org.acra.ACRA
 import org.acra.config.CoreConfigurationBuilder
+import org.dolphinemu.dolphinemu.DolphinApplication
 
-class EmuHubApp : Application() {
+class EmuHubApp : DolphinApplication() {
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         runCatching { ContextHolder.init(this) }
