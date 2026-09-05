@@ -15,38 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Add Dolphin Sys runtime installer
+      - name: Fix Dolphin Sys runtime marker
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
           s=p.read_text()
-          s=s.replace('if (coreId == "ppsspp") installPpssppAssets(systemRoot)','if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        if (coreId == "dolphin") installDolphinAssets(systemRoot)')
-          marker='    private fun installPpssppAssets(root:File){'
-          lines=[
-            '    private fun installDolphinAssets(root:File){',
-            '        val target=File(root,"dolphin-emu/Sys")',
-            '        val marker=File(target,".emuhub_dolphin_sys_v1")',
-            '        if(marker.exists())return',
-            '        target.mkdirs()',
-            '        copyAssetTree("Dolphin/Sys",target)',
-            '        if(File(target,"GC/font_ansi.bin").isFile) runCatching{marker.writeText("1")}',
-            '    }',
-            ''
-          ]
-          fn='\n'.join(lines)+'\n'
-          if 'private fun installDolphinAssets' not in s:
-              s=s.replace(marker,fn+marker)
+          s=s.replace('if(File(target,"GC/font_ansi.bin").isFile) runCatching{marker.writeText("1")}', 'if(File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile) runCatching{marker.writeText("1")}')
           p.write_text(s)
           PY
       - name: Validate patch
         run: |
-          grep -q 'installDolphinAssets(systemRoot)' app/src/main/java/com/ric/emuhub/GameActivity.kt
-          grep -q 'dolphin-emu/Sys' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          ! grep -q 'GC/font_ansi.bin' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'GC/font_western.bin' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'GC/dsp_rom.bin' app/src/main/java/com/ric/emuhub/GameActivity.kt
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/src/main/java/com/ric/emuhub/GameActivity.kt
-          git diff --cached --quiet || git commit -m "Install Dolphin libretro Sys assets internally"
+          git diff --cached --quiet || git commit -m "Fix Dolphin libretro Sys runtime marker"
           git push
