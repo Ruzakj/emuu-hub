@@ -1,2 +1,0 @@
-Trigger stable in-app update for Dolphin frontend FBO black-screen fix.
-Source fix commit: 7a762124ff83685aaa158dba899f6ac4ebf3086e

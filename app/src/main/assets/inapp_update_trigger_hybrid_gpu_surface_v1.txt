@@ -1,2 +1,0 @@
-Trigger stable in-app update for Dolphin hybrid GPU presentation.
-Source fix commit: fdd5c447cae76ba680d08fcc45c6893deec1738f

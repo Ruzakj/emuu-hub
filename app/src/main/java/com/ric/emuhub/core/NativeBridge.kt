@@ -4,7 +4,6 @@ object NativeBridge {
     init { System.loadLibrary("emuhost") }
 
     external fun setLogPath(path: String)
-    external fun setSurface(surface: android.view.Surface?)
     external fun init(corePath: String, systemDir: String, saveDir: String): Boolean
     external fun setControllerDevice(device: Int)
     external fun loadGame(path: String): Boolean

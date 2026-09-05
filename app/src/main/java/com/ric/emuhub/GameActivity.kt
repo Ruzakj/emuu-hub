@@ -13,8 +13,6 @@ import android.os.Bundle
 import android.os.Process
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -89,10 +87,6 @@ class GameActivity : Activity() {
             showLoadError("$coreLabel engine belum siap. Engine Pack sedang disiapkan; coba lagi setelah selesai.")
             return
         }
-        if (coreId == "dolphin") {
-            launchDolphinDirectSurface(rom, romName, corePath, coreLabel, systemRoot, saveDir)
-            return
-        }
         traceCoreStage("native_init", coreId, romName)
         if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }
         traceCoreStage("native_init_ok", coreId, romName)
@@ -106,33 +100,6 @@ class GameActivity : Activity() {
         setContentView(root)
         enableSafeFullscreen()
         gameView?.start()
-    }
-
-    private fun launchDolphinDirectSurface(rom:String,romName:String,corePath:String,coreLabel:String,systemRoot:File,saveDir:File){
-        val root=FrameLayout(this).apply{setBackgroundColor(0xFF000000.toInt())}
-        val surfaceView=SurfaceView(this)
-        root.addView(surfaceView,FrameLayout.LayoutParams(-1,-1))
-        root.addView(buildGamepadOverlay("dolphin"),FrameLayout.LayoutParams(-1,-1))
-        setContentView(root)
-        enableSafeFullscreen()
-        var started=false
-        surfaceView.holder.addCallback(object:SurfaceHolder.Callback{
-            override fun surfaceCreated(holder:SurfaceHolder){
-                if(started||cleanedUp)return
-                started=true
-                NativeBridge.setSurface(holder.surface)
-                traceCoreStage("native_init", "dolphin", romName)
-                if(!NativeBridge.init(corePath,systemRoot.absolutePath,saveDir.absolutePath)){traceCoreStage("native_init_failed","dolphin",romName,false);showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log");return}
-                traceCoreStage("native_init_ok","dolphin",romName)
-                traceCoreStage("load_game","dolphin",romName)
-                if(!NativeBridge.loadGame(rom)){traceCoreStage("load_game_failed","dolphin",romName,false);showLoadError("$coreLabel gagal memuat ${File(rom).name}. Log: emu-hub/CORE/core-runtime.log");return}
-                traceCoreStage("load_game_ok","dolphin",romName)
-                gameView=GameView("dolphin",gameProfile)
-                gameView?.start()
-            }
-            override fun surfaceChanged(holder:SurfaceHolder,format:Int,width:Int,height:Int){}
-            override fun surfaceDestroyed(holder:SurfaceHolder){}
-        })
     }
 
     private fun showPreparingScreen(message:String){
@@ -271,6 +238,8 @@ class GameActivity : Activity() {
         private fun updateVideo(){val w=NativeBridge.getWidth().coerceIn(1,1024);val h=NativeBridge.getHeight().coerceIn(1,1024);if(w*h<=pixels.size){if(w!=frameW||h!=frameH){frameW=w;frameH=h;bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)};bitmap.setPixels(pixels,0,w,0,0,w,h);postInvalidate()}}
         private fun drainAudioNonBlocking(){var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_NON_BLOCKING)?:-1;if(z>0)off+=z else break};if(off<count)break;count=NativeBridge.readAudio(audioScratch)}}
         private fun runPpsspp(){while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};try{Thread.sleep(8)}catch(_:Exception){break}}else{var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)}}}}
+        private fun runDolphin(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)};nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*4)nextFrame=now}}
+        private fun runDolphin(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)};nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*4)nextFrame=now}}
         private fun runDolphin(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)};nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*4)nextFrame=now}}
         private fun runClassicCore(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};drainAudioNonBlocking();nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*3)nextFrame=now}}
         override fun run(){runCatching{Process.setThreadPriority(profile.priority)};if(coreId=="ppsspp")runPpsspp()else if(coreId=="dolphin")runDolphin()else runClassicCore()}

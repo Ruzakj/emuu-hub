@@ -1,3 +1,0 @@
-Force stable in-app update publication for Dolphin hybrid GPU renderer.
-Target renderer commit: fdd5c447cae76ba680d08fcc45c6893deec1738f
-Reason: previous trigger became stale while renderer patch commit advanced main.
