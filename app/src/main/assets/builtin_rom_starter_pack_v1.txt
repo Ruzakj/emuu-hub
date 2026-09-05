@@ -11,5 +11,7 @@ SNES
 - Gothicvania
 - Hello World Region
 
-ROMs are staged by the Android build workflow from their original permissively licensed sources. BuiltinRomManager copies them to app-private storage on first launch and merges them into the Unified Library cache.
+ROMs are staged by both Android build and stable in-app release workflows from their original permissively licensed sources.
+At runtime the built-in ROMs are copied into app-private storage and merged into the Unified Library cache, while user ROM folders remain intact.
+Stable release verification now fails if any of the five built-in ROM assets are missing from the APK.
 No commercial ROMs are bundled.
