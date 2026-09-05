@@ -58,7 +58,7 @@ enum {
     ENV_SET_SUPPORT_NO_GAME=18, ENV_GET_LOG_INTERFACE=27, ENV_GET_SAVE_DIRECTORY=31,
     ENV_SET_SYSTEM_AV_INFO=32, ENV_SET_CONTROLLER_INFO=35, ENV_SET_MEMORY_MAPS=36,
     ENV_SET_GEOMETRY=37, ENV_GET_LANGUAGE=39, ENV_GET_INPUT_BITMASKS=51,
-    ENV_GET_PREFERRED_HW_RENDER=56
+    ENV_GET_PREFERRED_HW_RENDER=56, ENV_SET_HW_SHARED_CONTEXT=(44 | 0x10000)
 };
 enum { RETRO_DEVICE_JOYPAD=1, RETRO_DEVICE_ANALOG=5, RETRO_DEVICE_INDEX_ANALOG_LEFT=0, RETRO_DEVICE_ID_ANALOG_X=0, RETRO_DEVICE_ID_ANALOG_Y=1, RETRO_DEVICE_ID_JOYPAD_MASK=256 };
 
@@ -145,6 +145,7 @@ static void destroyHw(){
 
 static bool createHw(retro_hw_render_callback* cb){
     if(!cb)return false;
+    { char b[160]; std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0); traceLine(b); }
     if(cb->context_type!=RETRO_HW_CONTEXT_OPENGLES2 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES3 && cb->context_type!=RETRO_HW_CONTEXT_OPENGLES_VERSION){ LOGE("Unsupported HW context type %d",(int)cb->context_type); return false; }
     destroyHw();
     eglDisplay=eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -174,6 +175,7 @@ static bool createHw(retro_hw_render_callback* cb){
     glViewport(0,0,1024,1024); glClearColor(0,0,0,1); glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT); glFinish();
     releaseHwCurrent();
     LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);
+    traceLine("hw: EGL context registered");
     return true;
 }
 
@@ -230,6 +232,7 @@ static bool envCb(unsigned cmd,void* data){
         case ENV_GET_INPUT_BITMASKS:return true;
         case ENV_GET_PREFERRED_HW_RENDER:*reinterpret_cast<unsigned*>(data)=RETRO_HW_CONTEXT_OPENGLES3;return true;
         case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));
+        case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;
         case ENV_SET_SYSTEM_AV_INFO:{auto*av=reinterpret_cast<retro_system_av_info*>(data);if(av){frameW=av->geometry.base_width;frameH=av->geometry.base_height;sampleRate=(int)(av->timing.sample_rate>0?av->timing.sample_rate:44100);}return true;}
         case ENV_SET_GEOMETRY:{auto*g=reinterpret_cast<retro_game_geometry*>(data);if(g){frameW=g->base_width;frameH=g->base_height;}return true;}
         case ENV_SET_VARIABLES:case ENV_SET_INPUT_DESCRIPTORS:case ENV_SET_SUPPORT_NO_GAME:case ENV_SET_ROTATION:case ENV_SET_MESSAGE:case ENV_SET_PERFORMANCE_LEVEL:case ENV_SET_CONTROLLER_INFO:case ENV_SET_MEMORY_MAPS:return true;
@@ -285,7 +288,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_init
     traceLine("init: before retro_init");
     p_retro_init();
     traceLine("init: retro_init ok");
-    if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}
+    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");
     if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);
     traceLine("init: complete");
     LOGI("Core initialized: ppsspp=%d dolphin=%d hw=%d reset=%d",isPpsspp?1:0,isDolphin?1:0,hwEnabled?1:0,hwResetCalled?1:0);return JNI_TRUE;
@@ -295,7 +298,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_ric_emuhub_core_NativeBridge_setContr
 extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame(JNIEnv*e,jobject,jstring path){
     traceLine("loadGame: enter");const char*p=e->GetStringUTFChars(path,nullptr);retro_game_info info{p,nullptr,0,nullptr};traceLine("loadGame: before retro_load_game");bool ok=p_retro_load_game&&p_retro_load_game(&info);traceLine(ok?"loadGame: retro_load_game ok":"loadGame: retro_load_game failed");e->ReleaseStringUTFChars(path,p);
     if(!ok){LOGE("retro_load_game failed");if(hwEnabled)releaseHwCurrent();return JNI_FALSE;}
-    if(hwEnabled&&!hwResetCalled){if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}LOGI("Calling PPSSPP context_reset after retro_load_game");hwContextReset();hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");}
+    if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();}
     if(p_retro_get_system_av_info){retro_system_av_info av{};p_retro_get_system_av_info(&av);frameW=av.geometry.base_width;frameH=av.geometry.base_height;sampleRate=(int)(av.timing.sample_rate>0?av.timing.sample_rate:44100);frame.assign((size_t)frameW*frameH,0xFF000000u);audioBuffer.clear();LOGI("Game loaded: %ux%u %.2ffps %dHz hw=%d reset=%d",frameW,frameH,av.timing.fps,sampleRate,hwEnabled?1:0,hwResetCalled?1:0);}
     if(hwEnabled)releaseHwCurrent();return JNI_TRUE;
 }
