@@ -48,26 +48,28 @@ jobs:
           h = host.read_text()
           h = h.replace('static bool isPpsspp=false;','static bool isPpsspp=false;\nstatic bool isDolphin=false;')
           marker = 'static const char* ppssppOption(const char* key){'
-          dolphin_fn = '''static const char* dolphinOption(const char* key){
-              if(!key)return nullptr;
-              if(std::strcmp(key,"dolphin_cpu_core")==0)return "JITARM64";
-              if(std::strcmp(key,"dolphin_cpu_clock_rate")==0)return "100%";
-              if(std::strcmp(key,"dolphin_fastmem")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_dsp_hle")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_dsp_jit")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_emulation_speed")==0)return "100%";
-              if(std::strcmp(key,"dolphin_widescreen")==0)return "disabled";
-              if(std::strcmp(key,"dolphin_progressive_scan")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_pal60")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_enable_rumble")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_wiimote_continuous_scanning")==0)return "disabled";
-              if(std::strcmp(key,"dolphin_cheats_enabled")==0)return "disabled";
-              if(std::strcmp(key,"dolphin_osd_enabled")==0)return "enabled";
-              if(std::strcmp(key,"dolphin_log_level")==0)return "Error";
-              return nullptr;
-          }
-
-          '''
+          lines = [
+            'static const char* dolphinOption(const char* key){',
+            '    if(!key)return nullptr;',
+            '    if(std::strcmp(key,"dolphin_cpu_core")==0)return "JITARM64";',
+            '    if(std::strcmp(key,"dolphin_cpu_clock_rate")==0)return "100%";',
+            '    if(std::strcmp(key,"dolphin_fastmem")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_dsp_hle")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_dsp_jit")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_emulation_speed")==0)return "100%";',
+            '    if(std::strcmp(key,"dolphin_widescreen")==0)return "disabled";',
+            '    if(std::strcmp(key,"dolphin_progressive_scan")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_pal60")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_enable_rumble")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_wiimote_continuous_scanning")==0)return "disabled";',
+            '    if(std::strcmp(key,"dolphin_cheats_enabled")==0)return "disabled";',
+            '    if(std::strcmp(key,"dolphin_osd_enabled")==0)return "enabled";',
+            '    if(std::strcmp(key,"dolphin_log_level")==0)return "Error";',
+            '    return nullptr;',
+            '}',
+            ''
+          ]
+          dolphin_fn = '\n'.join(lines) + '\n'
           if 'dolphinOption(' not in h:
               h = h.replace(marker, dolphin_fn + marker)
           h = h.replace('v->value=isPpsspp?ppssppOption(v->key):nullptr;','v->value=isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr);')
