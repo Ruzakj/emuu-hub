@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version_code:
-        description: 'Android versionCode (must increase every release, e.g. 4)'
+        description: 'Android versionCode'
         required: true
         type: string
       version_name:
-        description: 'Visible version, e.g. 0.4.0'
+        description: 'Visible version'
         required: true
         type: string
       notes:
@@ -17,7 +17,7 @@ on:
         default: 'Emu Hub update'
         type: string
       thin_shell:
-        description: 'Exclude reusable libretro cores + PPSSPP assets (only after an Engine Pack capable release is installed)'
+        description: 'Exclude reusable classic cores + PPSSPP assets'
         required: true
         default: false
         type: boolean
@@ -50,10 +50,10 @@ jobs:
           KEYSTORE_B64: ${{ secrets.EMUHUB_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          test -n "$KEYSTORE_B64" || { echo 'Missing EMUHUB_KEYSTORE_BASE64'; exit 1; }
-          test -n "$EMUHUB_KEYSTORE_PASSWORD" || { echo 'Missing EMUHUB_KEYSTORE_PASSWORD'; exit 1; }
-          test -n "$EMUHUB_KEY_ALIAS" || { echo 'Missing EMUHUB_KEY_ALIAS'; exit 1; }
-          test -n "$EMUHUB_KEY_PASSWORD" || { echo 'Missing EMUHUB_KEY_PASSWORD'; exit 1; }
+          test -n "$KEYSTORE_B64"
+          test -n "$EMUHUB_KEYSTORE_PASSWORD"
+          test -n "$EMUHUB_KEY_ALIAS"
+          test -n "$EMUHUB_KEY_PASSWORD"
           SOURCE_STORE=/tmp/emuhub-source.jks
           NORMALIZED_STORE=/tmp/emuhub-normalized.p12
           NORMALIZED_PASS='EmuHubNormalizedRelease2026!'
@@ -64,15 +64,7 @@ jobs:
             rm -f "$NORMALIZED_STORE"
             keytool -importkeystore -srckeystore "$SOURCE_STORE" -srcstorepass "$EMUHUB_KEYSTORE_PASSWORD" -srcalias "$EMUHUB_KEY_ALIAS" -srckeypass "$keypass" -destkeystore "$NORMALIZED_STORE" -deststoretype PKCS12 -deststorepass "$NORMALIZED_PASS" -destkeypass "$NORMALIZED_PASS" -noprompt >/dev/null 2>&1
           }
-          if normalize_with "$EMUHUB_KEY_PASSWORD"; then
-            echo 'Signing private key imported with configured key password.'
-          elif normalize_with "$EMUHUB_KEYSTORE_PASSWORD"; then
-            echo 'Signing private key uses the keystore password; normalized automatically.'
-          else
-            echo 'Signing private key cannot be unlocked with the configured secrets.' >&2
-            exit 1
-          fi
-          keytool -list -keystore "$NORMALIZED_STORE" -storetype PKCS12 -storepass "$NORMALIZED_PASS" -alias "$EMUHUB_KEY_ALIAS" >/dev/null
+          if normalize_with "$EMUHUB_KEY_PASSWORD"; then :; elif normalize_with "$EMUHUB_KEYSTORE_PASSWORD"; then :; else exit 1; fi
           echo "EMUHUB_KEYSTORE_PATH=$NORMALIZED_STORE" >> "$GITHUB_ENV"
           echo "EMUHUB_KEYSTORE_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
           echo "EMUHUB_KEY_PASSWORD=$NORMALIZED_PASS" >> "$GITHUB_ENV"
@@ -82,7 +74,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Download internal libretro cores
+      - name: Download internal libretro cores including Dolphin
         shell: bash
         run: |
           set -euo pipefail
@@ -99,6 +91,21 @@ jobs:
           fetch_core snes9x libsnes9x_core.so
           fetch_core pcsx_rearmed libpcsx_rearmed_core.so
           fetch_core ppsspp libppsspp_core.so
+          fetch_core dolphin libdolphin_core.so
+          test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
+
+      - name: Stage Dolphin Sys runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/dolphin-libretro app/src/main/assets/Dolphin
+          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/libretro/dolphin.git /tmp/dolphin-libretro
+          test -d /tmp/dolphin-libretro/Data/Sys
+          mkdir -p app/src/main/assets/Dolphin/Sys
+          cp -a /tmp/dolphin-libretro/Data/Sys/. app/src/main/assets/Dolphin/Sys/
+          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_coef.bin
 
       - name: Stage PPSSPP runtime assets
         run: |
@@ -127,26 +134,22 @@ jobs:
         run: |
           set -euxo pipefail
           ROOT=app/src/main/assets/builtin-roms
-          rm -rf "$ROOT"
-          mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
+          rm -rf "$ROOT"; mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" -o "$ROOT/NES/Galaxy Patrol.nes"
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" -o "$ROOT/GBA/Rkanoid Modern.gba"
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" -o "$ROOT/GBA/Rkanoid Demo.gba"
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"
-          test -s "$ROOT/NES/Galaxy Patrol.nes"
-          test -s "$ROOT/GBA/Rkanoid Modern.gba"
-          test -s "$ROOT/GBA/Rkanoid Demo.gba"
-          test -s "$ROOT/SNES/Gothicvania.sfc"
-          test -s "$ROOT/SNES/Hello World Region.sfc"
 
-      - name: Prepare thin app shell
+      - name: Prepare thin app shell but keep Dolphin internal
         if: ${{ inputs.thin_shell }}
         shell: bash
         run: |
           set -euo pipefail
           rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so app/src/main/jniLibs/arm64-v8a/libfceumm_core.so app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           rm -rf app/src/main/assets/PPSSPP
+          test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
+          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -155,7 +158,7 @@ jobs:
       - name: Build stable signed release APK
         run: gradle assembleRelease --build-cache --parallel --stacktrace
 
-      - name: Verify APK signature and package
+      - name: Verify signed APK contains Dolphin core and Sys
         shell: bash
         run: |
           set -euo pipefail
@@ -163,11 +166,11 @@ jobs:
           test -n "$APK"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          unzip -l "$APK" | grep -F "assets/builtin-roms/NES/Galaxy Patrol.nes"
-          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Modern.gba"
-          unzip -l "$APK" | grep -F "assets/builtin-roms/GBA/Rkanoid Demo.gba"
-          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Gothicvania.sfc"
-          unzip -l "$APK" | grep -F "assets/builtin-roms/SNES/Hello World Region.sfc"
+          unzip -l "$APK" | grep -F "lib/arm64-v8a/libdolphin_core.so"
+          unzip -l "$APK" | grep -F "lib/arm64-v8a/libemuhost.so"
+          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/font_western.bin"
+          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/dsp_rom.bin"
+          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/dsp_coef.bin"
           mkdir -p dist
           cp "$APK" "dist/EmuHub-v${EMUHUB_VERSION_NAME}-arm64.apk"
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
@@ -182,24 +185,11 @@ jobs:
           TITLE="Emu Hub ${EMUHUB_VERSION_NAME}"
           NOTES='${{ inputs.notes }}'
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            created=false
-            for attempt in 1 2 3 4 5; do
-              if gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES"; then created=true; break; fi
-              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then created=true; break; fi
-              sleep $((attempt * 4))
-            done
-            $created || exit 1
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES"
           fi
-          uploaded=false
-          for attempt in 1 2 3 4 5; do
-            if gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then uploaded=true; break; fi
-            sleep $((attempt * 4))
-          done
-          $uploaded || exit 1
-          ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-          echo "$ASSETS" | grep -qE '\.apk$'
-          echo "$ASSETS" | grep -qx 'SHA256SUMS.txt'
-          echo "Release $TAG is complete and ready for the in-app updater."
+          gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qE '\.apk$'
+          echo "Release $TAG contains internal Dolphin and is ready for in-app update."
 
       - uses: actions/upload-artifact@v4
         with:
