@@ -1,0 +1,42 @@
+name: Patch Dolphin Zip Runtime
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-zip-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace recursive Dolphin asset copy with streaming zip extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          s=p.read_text()
+          if 'import java.util.zip.ZipInputStream' not in s:
+              s=s.replace('import java.util.concurrent.locks.LockSupport\n','import java.util.concurrent.locks.LockSupport\nimport java.util.zip.ZipInputStream\n')
+          old='''    private fun installDolphinAssets(root:File):Boolean{\n        val target=File(root,"dolphin-emu/Sys")\n        val marker=File(target,".emuhub_dolphin_sys_v2")\n        val required={ File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile }\n        if(marker.exists() && required()) return true\n        return runCatching {\n            val packaged=assets.list("Dolphin/Sys") ?: emptyArray()\n            if(packaged.isEmpty()) return@runCatching false\n            target.mkdirs()\n            copyAssetTree("Dolphin/Sys",target)\n            if(required()){ marker.writeText("2"); true } else false\n        }.getOrElse {\n            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_asset_exception=${it.javaClass.simpleName}:${it.message}\\n") }\n            false\n        }\n    }\n'''
+          new='''    private fun installDolphinAssets(root:File):Boolean{\n        val target=File(root,"dolphin-emu/Sys")\n        val marker=File(target,".emuhub_dolphin_sys_zip_v3")\n        val required={ File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile }\n        if(marker.exists() && required()) return true\n        return runCatching {\n            traceCoreStage("dolphin_zip_open", "dolphin", intent.getStringExtra("romName") ?: "unknown")\n            target.mkdirs()\n            assets.open("Dolphin/Sys.zip").use { raw ->\n                ZipInputStream(raw.buffered(1024*1024)).use { zip ->\n                    val canonicalRoot=target.canonicalFile\n                    var entry=zip.nextEntry\n                    var count=0\n                    val buffer=ByteArray(1024*1024)\n                    while(entry!=null){\n                        val outFile=File(target,entry.name).canonicalFile\n                        if(!outFile.path.startsWith(canonicalRoot.path + File.separator)) throw SecurityException("Invalid Dolphin zip entry: ${entry.name}")\n                        if(entry.isDirectory){\n                            outFile.mkdirs()\n                        }else{\n                            outFile.parentFile?.mkdirs()\n                            outFile.outputStream().buffered(1024*1024).use { out ->\n                                var n=zip.read(buffer)\n                                while(n>0){ out.write(buffer,0,n); n=zip.read(buffer) }\n                            }\n                        }\n                        zip.closeEntry()\n                        count++\n                        if(count%250==0) runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_entries=$count\\n") }\n                        entry=zip.nextEntry\n                    }\n                    runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_complete entries=$count\\n") }\n                }\n            }\n            if(required()){ marker.writeText("3"); true } else false\n        }.getOrElse {\n            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_exception=${it.javaClass.simpleName}:${it.message}\\n") }\n            false\n        }\n    }\n'''
+          if old not in s:
+              raise SystemExit('Current Dolphin installer block not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'ZipInputStream' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q 'Dolphin/Sys.zip' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Extract Dolphin Sys from streaming runtime zip'
+          git push
