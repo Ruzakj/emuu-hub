@@ -1,0 +1,78 @@
+name: Fix Dolphin Stable First Frame
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fix-dolphin-first-frame.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+      - name: Patch canonical build, release, and runtime prepare path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # 1) Runtime: never crash while preparing missing Dolphin assets.
+          p = Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          s = p.read_text()
+          old = '''        traceCoreStage("prepare", coreId, romName)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        if (coreId == "dolphin") installDolphinAssets(systemRoot)\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")\n'''
+          new = '''        traceCoreStage("prepare", coreId, romName)\n        if (coreId == "ppsspp") installPpssppAssets(systemRoot)\n        if (coreId == "dolphin") {\n            traceCoreStage("prepare_dolphin_assets", coreId, romName)\n            if (!installDolphinAssets(systemRoot)) {\n                traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)\n                showLoadError("Dolphin Sys assets tidak ada di APK. Update Emu Hub ke build terbaru.")\n                return\n            }\n            traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)\n        }\n        val saveDir = StoragePaths.savesDir(this)\n        stateFile = File(StoragePaths.statesDir(this), "${coreId}_${safeStateKey(romName)}_slot0.state")\n        traceCoreStage("resolve_core", coreId, romName)\n        val corePath = EnginePackManager.corePath(this, coreFile) ?: (applicationInfo.nativeLibraryDir + "/$coreFile")\n        traceCoreStage("resolve_core_done", coreId, romName)\n'''
+          if old not in s:
+              raise SystemExit('GameActivity prepare block not found')
+          s = s.replace(old, new, 1)
+          old2 = '''    private fun installDolphinAssets(root:File){\n        val target=File(root,"dolphin-emu/Sys")\n        val marker=File(target,".emuhub_dolphin_sys_v1")\n        if(marker.exists())return\n        target.mkdirs()\n        copyAssetTree("Dolphin/Sys",target)\n        if(File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile) runCatching{marker.writeText("1")}\n    }\n'''
+          new2 = '''    private fun installDolphinAssets(root:File):Boolean{\n        val target=File(root,"dolphin-emu/Sys")\n        val marker=File(target,".emuhub_dolphin_sys_v2")\n        val required={ File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile }\n        if(marker.exists() && required()) return true\n        return runCatching {\n            val packaged=assets.list("Dolphin/Sys") ?: emptyArray()\n            if(packaged.isEmpty()) return@runCatching false\n            target.mkdirs()\n            copyAssetTree("Dolphin/Sys",target)\n            if(required()){ marker.writeText("2"); true } else false\n        }.getOrElse {\n            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_asset_exception=${it.javaClass.simpleName}:${it.message}\\n") }\n            false\n        }\n    }\n'''
+          if old2 not in s:
+              raise SystemExit('installDolphinAssets block not found')
+          s = s.replace(old2, new2, 1)
+          p.write_text(s)
+
+          # Common Dolphin staging block for canonical build.
+          p = Path('.github/workflows/build-apk.yml')
+          s = p.read_text()
+          anchor = '      - name: Stage PPSSPP runtime assets\n'
+          if 'Restore cached Dolphin core' not in s:
+              block = '''      - name: Restore cached Dolphin core\n        id: dolphin-cache\n        uses: actions/cache@v4\n        with:\n          path: app/src/main/jniLibs/arm64-v8a/libdolphin_core.so\n          key: dolphin-arm64-libretro-v2\n\n      - name: Download Dolphin ARM64 core on cache miss\n        if: steps.dolphin-cache.outputs.cache-hit != 'true'\n        run: |\n          mkdir -p app/src/main/jniLibs/arm64-v8a /tmp/dolphin\n          curl --retry 3 --retry-delay 2 -fL "https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/dolphin_libretro_android.so.zip" -o /tmp/dolphin.zip\n          unzip -q /tmp/dolphin.zip -d /tmp/dolphin\n          cp "$(find /tmp/dolphin -type f -name '*.so' | head -n 1)" app/src/main/jniLibs/arm64-v8a/libdolphin_core.so\n\n      - name: Stage Dolphin Sys assets\n        run: |\n          set -euxo pipefail\n          rm -rf /tmp/dolphin-libretro app/src/main/assets/Dolphin\n          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/libretro/dolphin.git /tmp/dolphin-libretro\n          test -d /tmp/dolphin-libretro/Data/Sys\n          mkdir -p app/src/main/assets/Dolphin/Sys\n          cp -a /tmp/dolphin-libretro/Data/Sys/. app/src/main/assets/Dolphin/Sys/\n          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin\n          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin\n          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_coef.bin\n\n'''
+              if anchor not in s: raise SystemExit('build-apk PPSSPP anchor missing')
+              s = s.replace(anchor, block + anchor, 1)
+          if 'test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so' not in s:
+              s = s.replace('          test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so\n', '          test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so\n          test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so\n          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin\n', 1)
+          if "unzip -l \"$APK\" | grep 'lib/arm64-v8a/libdolphin_core.so'" not in s:
+              s = s.replace("          unzip -l \"$APK\" | grep 'lib/arm64-v8a/libppsspp_core.so'\n", "          unzip -l \"$APK\" | grep 'lib/arm64-v8a/libppsspp_core.so'\n          unzip -l \"$APK\" | grep 'lib/arm64-v8a/libdolphin_core.so'\n          unzip -l \"$APK\" | grep 'assets/Dolphin/Sys/GC/font_western.bin'\n", 1)
+          p.write_text(s)
+
+          # 3) Stable release is rebuilt from source, so it must stage Dolphin too.
+          p = Path('.github/workflows/release-apk.yml')
+          s = p.read_text()
+          if 'fetch_core dolphin libdolphin_core.so' not in s:
+              s = s.replace('          fetch_core ppsspp libppsspp_core.so\n', '          fetch_core ppsspp libppsspp_core.so\n          fetch_core dolphin libdolphin_core.so\n', 1)
+          anchor = '      - name: Stage PPSSPP runtime assets\n'
+          if '      - name: Stage Dolphin Sys assets\n' not in s:
+              block = '''      - name: Stage Dolphin Sys assets\n        run: |\n          set -euxo pipefail\n          rm -rf /tmp/dolphin-libretro app/src/main/assets/Dolphin\n          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/libretro/dolphin.git /tmp/dolphin-libretro\n          test -d /tmp/dolphin-libretro/Data/Sys\n          mkdir -p app/src/main/assets/Dolphin/Sys\n          cp -a /tmp/dolphin-libretro/Data/Sys/. app/src/main/assets/Dolphin/Sys/\n          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin\n          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin\n          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_coef.bin\n\n'''
+              if anchor not in s: raise SystemExit('release PPSSPP anchor missing')
+              s = s.replace(anchor, block + anchor, 1)
+          verify_anchor='          unzip -l "$APK" | grep -F "assets/builtin-roms/NES/Galaxy Patrol.nes"\n'
+          if 'lib/arm64-v8a/libdolphin_core.so' not in s:
+              s = s.replace(verify_anchor, '          unzip -l "$APK" | grep -F "lib/arm64-v8a/libdolphin_core.so"\n          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/font_western.bin"\n' + verify_anchor, 1)
+          p.write_text(s)
+          PY
+
+          git diff --check
+          git diff -- app/src/main/java/com/ric/emuhub/GameActivity.kt .github/workflows/build-apk.yml .github/workflows/release-apk.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/GameActivity.kt .github/workflows/build-apk.yml .github/workflows/release-apk.yml
+          git commit -m 'Package Dolphin core in stable builds and harden prepare path'
+          git push
