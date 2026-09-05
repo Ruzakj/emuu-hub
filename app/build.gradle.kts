@@ -73,7 +73,6 @@ dependencies {
     implementation("org.tukaani:xz:1.10")
     implementation("com.github.junrar:junrar:7.5.5")
 
-    implementation(files("libs/dolphin-runtime.aar"))
     implementation(files("libs/jlmod-runtime.aar"))
     implementation(files("libs/jlmod-dexlib.aar"))
     implementation("androidx.databinding:viewbinding:8.7.3")
