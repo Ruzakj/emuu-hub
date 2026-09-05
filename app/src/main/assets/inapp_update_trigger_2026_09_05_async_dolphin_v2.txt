@@ -1,0 +1,2 @@
+Trigger stable in-app update after async Dolphin Sys preparation hotfix.
+Source includes worker-thread Dolphin runtime extraction to prevent prepare-stage UI blocking/FC.
