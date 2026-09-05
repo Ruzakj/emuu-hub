@@ -32,3 +32,4 @@ jobs:
           git add app/src/main/cpp/emuhost.cpp app/src/main/java/com/ric/emuhub/GameActivity.kt
           git commit -m 'Use async PBO readback and fix Dolphin audio pacing'
           git push origin main
+# trigger: 2026-09-05T21:48+07:00
