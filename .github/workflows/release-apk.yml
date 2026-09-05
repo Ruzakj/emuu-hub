@@ -94,18 +94,21 @@ jobs:
           fetch_core dolphin libdolphin_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
 
-      - name: Stage Dolphin Sys runtime
+      - name: Stage Dolphin Sys runtime zip
         shell: bash
         run: |
           set -euxo pipefail
           rm -rf /tmp/dolphin-libretro app/src/main/assets/Dolphin
           git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/libretro/dolphin.git /tmp/dolphin-libretro
-          test -d /tmp/dolphin-libretro/Data/Sys
-          mkdir -p app/src/main/assets/Dolphin/Sys
-          cp -a /tmp/dolphin-libretro/Data/Sys/. app/src/main/assets/Dolphin/Sys/
-          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
-          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin
-          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_coef.bin
+          test -s /tmp/dolphin-libretro/Data/Sys/GC/font_western.bin
+          test -s /tmp/dolphin-libretro/Data/Sys/GC/dsp_rom.bin
+          test -s /tmp/dolphin-libretro/Data/Sys/GC/dsp_coef.bin
+          mkdir -p app/src/main/assets/Dolphin
+          (cd /tmp/dolphin-libretro/Data/Sys && zip -qr "$GITHUB_WORKSPACE/app/src/main/assets/Dolphin/Sys.zip" .)
+          test -s app/src/main/assets/Dolphin/Sys.zip
+          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/font_western.bin'
+          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/dsp_rom.bin'
+          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/dsp_coef.bin'
 
       - name: Stage PPSSPP runtime assets
         run: |
@@ -149,7 +152,7 @@ jobs:
           rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so app/src/main/jniLibs/arm64-v8a/libfceumm_core.so app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           rm -rf app/src/main/assets/PPSSPP
           test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
-          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
+          test -s app/src/main/assets/Dolphin/Sys.zip
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -158,7 +161,7 @@ jobs:
       - name: Build stable signed release APK
         run: gradle assembleRelease --build-cache --parallel --stacktrace
 
-      - name: Verify signed APK contains Dolphin core and Sys
+      - name: Verify signed APK contains Dolphin core and runtime zip
         shell: bash
         run: |
           set -euo pipefail
@@ -168,9 +171,12 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           unzip -l "$APK" | grep -F "lib/arm64-v8a/libdolphin_core.so"
           unzip -l "$APK" | grep -F "lib/arm64-v8a/libemuhost.so"
-          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/font_western.bin"
-          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/dsp_rom.bin"
-          unzip -l "$APK" | grep -F "assets/Dolphin/Sys/GC/dsp_coef.bin"
+          unzip -l "$APK" | grep -F "assets/Dolphin/Sys.zip"
+          unzip -p "$APK" assets/Dolphin/Sys.zip > /tmp/DolphinSys.zip
+          test -s /tmp/DolphinSys.zip
+          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/font_western.bin'
+          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/dsp_rom.bin'
+          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/dsp_coef.bin'
           mkdir -p dist
           cp "$APK" "dist/EmuHub-v${EMUHUB_VERSION_NAME}-arm64.apk"
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
