@@ -1,0 +1,54 @@
+name: Fix Built-in ROM Runtime Integration
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Add starter ROM runtime patch workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch MainActivity built-in ROM extraction and library merge
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s = p.read_text()
+
+          old = '''        migrateLegacyFolder()\n        renderHome()\n        val cached = loadCache()\n        if (cached.isNotEmpty()) renderLibrary(cached, "${cached.size} game • cache") else showEmptyLibrary()\n        refreshAllFolders(false)'''
+          new = '''        migrateLegacyFolder()\n        val builtin = ensureBuiltinGames()\n        renderHome()\n        val cached = sortGames((builtin + loadCache()).distinctBy { it.uri })\n        saveCache(cached)\n        if (cached.isNotEmpty()) renderLibrary(cached, "${cached.size} game • built-in + cache") else showEmptyLibrary()\n        refreshAllFolders(false)'''
+          if old not in s:
+              raise SystemExit('onCreate anchor not found')
+          s = s.replace(old, new, 1)
+
+          anchor = '''    private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)},REQUEST_FOLDER)}\n    private fun openRomPicker(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply{addCategory(Intent.CATEGORY_OPENABLE);type="*/*";addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)},REQUEST_ROM)}\n\n'''
+          helper = '''    private fun chooseRomFolder(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply{addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)},REQUEST_FOLDER)}\n    private fun openRomPicker(){startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply{addCategory(Intent.CATEGORY_OPENABLE);type="*/*";addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)},REQUEST_ROM)}\n\n    private fun ensureBuiltinGames():List<GameEntry>{\n        val root=File(filesDir,"builtin-roms").apply{mkdirs()}\n        val games=mutableListOf<GameEntry>()\n        for(system in listOf("NES","GBA","SNES")){\n            val assetDir="builtin-roms/$system"\n            for(name in runCatching{assets.list(assetDir)?.toList().orEmpty()}.getOrDefault(emptyList())){\n                val ext=extension(name)\n                if(ext !in INTERNAL)continue\n                val dir=File(root,system).apply{mkdirs()}\n                val out=File(dir,name)\n                runCatching{\n                    assets.open("$assetDir/$name").use{input->out.outputStream().use{output->input.copyTo(output)}}\n                }.onFailure{out.delete()}\n                if(out.isFile&&out.length()>0L)games.add(GameEntry(Uri.fromFile(out).toString(),name,ext,"BUILT-IN/$system"))\n            }\n        }\n        return sortGames(games.distinctBy{it.uri})\n    }\n\n'''
+          if anchor not in s:
+              raise SystemExit('helper anchor not found')
+          s = s.replace(anchor, helper, 1)
+
+          old_refresh = '''    private fun refreshAllFolders(userRequested:Boolean){\n        val trees=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.filter{it.isNotBlank()}.orEmpty()\n        if(trees.isEmpty()){if(userRequested)chooseRomFolder();return}\n        status.text=if(userRequested)"Refreshing ${trees.size} folder..." else "Library ready • background scan"\n        val pending=AtomicInteger(trees.size);val merged=java.util.Collections.synchronizedList(mutableListOf<GameEntry>())\n        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames(merged.distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • ${trees.size} folder")}}}}\n    }'''
+          new_refresh = '''    private fun refreshAllFolders(userRequested:Boolean){\n        val builtin=ensureBuiltinGames()\n        val trees=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.filter{it.isNotBlank()}.orEmpty()\n        if(trees.isEmpty()){saveCache(builtin);if(builtin.isEmpty())showEmptyLibrary() else renderLibrary(builtin,"${builtin.size} built-in game");if(userRequested)chooseRomFolder();return}\n        status.text=if(userRequested)"Refreshing ${trees.size} folder..." else "Library ready • background scan"\n        val pending=AtomicInteger(trees.size);val merged=java.util.Collections.synchronizedList(mutableListOf<GameEntry>())\n        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames((builtin+merged).distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • built-in + ${trees.size} folder")}}}}\n    }'''
+          if old_refresh not in s:
+              raise SystemExit('refresh anchor not found')
+          s = s.replace(old_refresh, new_refresh, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit runtime fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt
+          git diff --cached --check
+          git commit -m "Fix built-in ROM extraction and library indexing"
+          git push origin main
