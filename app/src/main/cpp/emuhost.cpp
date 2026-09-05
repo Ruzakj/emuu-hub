@@ -12,6 +12,7 @@
 #include <iterator>
 #include <cstdarg>
 #include <ctime>
+#include <cstdio>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "EmuHost", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "EmuHost", __VA_ARGS__)
@@ -241,6 +242,8 @@ static bool envCb(unsigned cmd,void* data){
 }
 
 static void captureHw(unsigned width,unsigned height){
+    static bool firstCapture=true;
+    if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}
     if(width==0||height==0||width>1024||height>1024)return;
     frameW=width;frameH=height;
     const size_t pixelCount=(size_t)width*height;
