@@ -1,0 +1,44 @@
+name: Patch Dolphin RetroInit HW Crash
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-retroinit-hw-crash.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Defer Dolphin HW context reset until after load_game
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/cpp/emuhost.cpp')
+          s=p.read_text()
+          old='''    traceLine("init: retro_init ok");\n    if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
+          new='''    traceLine("init: retro_init ok");\n    // Dolphin registers HW rendering during retro_init, but its context_reset may touch\n    // subsystems that are not ready until content has been loaded. Do not invoke it here.\n    // loadGame() owns the first context_reset and traces every boundary persistently.\n    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
+          if old not in s:
+              raise SystemExit('retro_init reset block not found')
+          s=s.replace(old,new,1)
+          old2='''    if(!ok){LOGE("retro_load_game failed'''
+          if old2 not in s:
+              raise SystemExit('loadGame tail anchor not found')
+          # Existing loadGame already performs/reset logic later; add tracing around any first reset there.
+          s=s.replace('''if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent())return JNI_FALSE;hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();}''', '''if(hwEnabled&&hwContextReset&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glFinish();releaseHwCurrent();}''')
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'hw reset deferred until load_game' app/src/main/cpp/emuhost.cpp
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp
+          git commit -m 'Defer Dolphin HW reset until content load'
+          git push
