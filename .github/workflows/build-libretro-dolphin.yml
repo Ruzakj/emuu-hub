@@ -5,6 +5,8 @@ on:
   push:
     branches: [ main ]
     paths:
+      - 'app/build.gradle.kts'
+      - 'app/src/main/java/com/ric/emuhub/EmuHubApp.kt'
       - 'app/src/main/java/com/ric/emuhub/MainActivity.kt'
       - 'app/src/main/java/com/ric/emuhub/GameActivity.kt'
       - 'app/src/main/cpp/emuhost.cpp'
@@ -33,6 +35,13 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "platforms;android-36" "ndk;27.0.12077973" "cmake;3.22.1"
 
+      - name: Reject obsolete external or AAR Dolphin integration
+        run: |
+          set -euxo pipefail
+          ! grep -R "Dolphin Emulator diperlukan\|DOWNLOAD DOLPHIN\|dolphin-emu.org/download\|DOLPHIN_PACKAGE" app/src/main/java/com/ric/emuhub
+          ! grep -R "org.dolphinemu.dolphinemu" app/src/main/java app/build.gradle.kts
+          ! grep -q 'dolphin-runtime.aar' app/build.gradle.kts
+
       - name: Stage standard Emu Hub cores
         run: |
           set -euxo pipefail
@@ -59,7 +68,9 @@ jobs:
           test -d /tmp/dolphin-libretro/Data/Sys
           mkdir -p app/src/main/assets/Dolphin/Sys
           cp -a /tmp/dolphin-libretro/Data/Sys/. app/src/main/assets/Dolphin/Sys/
-          test -f app/src/main/assets/Dolphin/Sys/GC/font_ansi.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_coef.bin
 
       - name: Stage PPSSPP assets
         run: |
@@ -76,10 +87,11 @@ jobs:
           set -euxo pipefail
           RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-apk.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
           test -n "$RUN_ID"
-          rm -rf /tmp/base && mkdir -p /tmp/base
+          rm -rf /tmp/base /tmp/base-apk && mkdir -p /tmp/base
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n EmuHub-InternalCores-debug -D /tmp/base
           APK=$(find /tmp/base -type f -name '*.apk' | head -1)
           test -n "$APK"
+          mkdir -p /tmp/base-apk
           unzip -q "$APK" -d /tmp/base-apk
           cp /tmp/base-apk/lib/arm64-v8a/libemucore_4k.so app/src/main/jniLibs/arm64-v8a/
           cp -a /tmp/base-apk/assets/ARMSX2 app/src/main/assets/ || true
@@ -90,8 +102,8 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
-          test -d app/src/main/assets/Dolphin/Sys
-          ! grep -R "DOWNLOAD DOLPHIN\|Dolphin Emulator diperlukan\|dolphin-emu.org/download" app/src/main/java/com/ric/emuhub
+          test -s app/src/main/assets/Dolphin/Sys/GC/font_western.bin
+          test -s app/src/main/assets/Dolphin/Sys/GC/dsp_rom.bin
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -108,7 +120,8 @@ jobs:
           unzip -l "$APK" | grep 'lib/arm64-v8a/libdolphin_core.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libpcsx_rearmed_core.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
-          unzip -l "$APK" | grep 'assets/Dolphin/Sys/GC/font_ansi.bin'
+          unzip -l "$APK" | grep 'assets/Dolphin/Sys/GC/font_western.bin'
+          unzip -l "$APK" | grep 'assets/Dolphin/Sys/GC/dsp_rom.bin'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
