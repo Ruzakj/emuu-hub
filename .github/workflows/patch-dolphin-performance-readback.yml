@@ -1,0 +1,61 @@
+name: Patch Dolphin Performance Readback
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-performance-readback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reduce Dolphin GPU readback overhead
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/cpp/emuhost.cpp')
+          s=p.read_text()
+          if 'static bool frameDirty=false;' not in s:
+              s=s.replace('static bool isPpsspp=false,isDolphin=false,shutdownRequested=false,firstRun=true,firstCapture=true;',
+                          'static bool isPpsspp=false,isDolphin=false,shutdownRequested=false,firstRun=true,firstCapture=true; static bool frameDirty=false; static unsigned dolphinPresentDiv=0;',1)
+          s=s.replace('if(!strcmp(k,"dolphin_cpu_clock_rate"))return "100%";',
+                      'if(!strcmp(k,"dolphin_cpu_clock_rate"))return "85%";if(!strcmp(k,"dolphin_internal_resolution"))return "1x Native (640x528)";',1)
+          old='static void captureHw(unsigned w,unsigned h){if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}if(!w||!h||w>1024||h>1024)return;'
+          new='static void captureHw(unsigned w,unsigned h){if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}if(isDolphin&&((dolphinPresentDiv++&1u)!=0u))return;if(!w||!h||w>1024||h>1024)return;'
+          if old not in s: raise SystemExit('captureHw anchor missing')
+          s=s.replace(old,new,1)
+          tail='frame[(size_t)y*w+x]=0xFF000000u|((p&255)<<16)|(p&0xFF00)|((p>>16)&255);}}}'
+          if tail not in s: raise SystemExit('capture tail missing')
+          s=s.replace(tail,tail[:-1]+'frameDirty=true;}',1)
+          sw='frame[(size_t)y*w+x]=a;}}}'
+          if sw in s: s=s.replace(sw,sw[:-1]+'frameDirty=true;}',1)
+          s=s.replace('shutdownRequested=false;firstRun=true;firstCapture=true;',
+                      'shutdownRequested=false;firstRun=true;firstCapture=true;frameDirty=false;dolphinPresentDiv=0;',1)
+          oldrun='jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,c,(const jint*)frame.data());return(jint)c;'
+          newrun='if(!frameDirty)return 0;frameDirty=false;jsize n=e->GetArrayLength(p);size_t c=std::min(frame.size(),(size_t)n);if(c)e->SetIntArrayRegion(p,0,c,(const jint*)frame.data());return(jint)c;'
+          if oldrun not in s: raise SystemExit('runFrame copy anchor missing')
+          s=s.replace(oldrun,newrun,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'dolphinPresentDiv' app/src/main/cpp/emuhost.cpp
+          grep -q 'frameDirty' app/src/main/cpp/emuhost.cpp
+          grep -q '85%' app/src/main/cpp/emuhost.cpp
+      - name: Commit performance patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp
+          git commit -m 'Reduce Dolphin GPU readback overhead'
+          git push origin main
