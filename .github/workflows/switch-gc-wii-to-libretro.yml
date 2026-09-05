@@ -1,0 +1,91 @@
+name: Switch GC Wii to Libretro Core
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/switch-gc-wii-to-libretro.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Emu Hub for internal Dolphin libretro core
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s = main.read_text()
+          s = s.replace('        private const val DOLPHIN_PACKAGE = "org.dolphinemu.dolphinemu"\n','')
+          s = s.replace('arrayOf("GAMECUBE","Dolphin","C"),arrayOf("WII","Dolphin","W")','arrayOf("GAMECUBE","Dolphin Core","C"),arrayOf("WII","Dolphin Core","W")')
+          s = s.replace('"GAMECUBE","WII"->launchDolphin(target)','"GAMECUBE","WII"->copyAndLaunchInternal(uri,g.name,g.ext,"dolphin")')
+          s = s.replace('ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->launchDolphin(if(ext in setOf("wbfs","wia","wad")) "WII" else "GAMECUBE")','ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->copyAndLaunchInternal(uri,name,ext,"dolphin")')
+          old_iso = 'private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}'
+          new_iso = 'private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • Dolphin Core")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);else->copyAndLaunchInternal(uri,name,"iso","dolphin")}}.setNegativeButton("Batal",null).show()}'
+          s = s.replace(old_iso, new_iso)
+          s = re.sub(r'\n    private fun launchDolphin\(system:String\)\{.*?\n    \}\n', '\n', s, flags=re.S, count=1)
+          main.write_text(s)
+
+          game = Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          g = game.read_text()
+          g = g.replace('"ppsspp" -> "libppsspp_core.so"; else -> "libmgba_core.so"','"ppsspp" -> "libppsspp_core.so"; "dolphin" -> "libdolphin_core.so"; else -> "libmgba_core.so"')
+          g = g.replace('"ppsspp" -> "PPSSPP"; else -> "mGBA"','"ppsspp" -> "PPSSPP"; "dolphin" -> "Dolphin Core"; else -> "mGBA"')
+          g = g.replace('coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)','coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)\n            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)')
+          g = g.replace('if(coreId=="pcsx"||coreId=="ppsspp")overlay.addView(AnalogStickView()','if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")overlay.addView(AnalogStickView()')
+          g = g.replace('leftMargin=if(coreId=="pcsx"||coreId=="ppsspp")dp(188) else dp(42)','leftMargin=if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")dp(188) else dp(42)')
+          g = g.replace('when(coreId){"pcsx","ppsspp"->{','when(coreId){"pcsx","ppsspp","dolphin"->{')
+          game.write_text(g)
+
+          host = Path('app/src/main/cpp/emuhost.cpp')
+          h = host.read_text()
+          h = h.replace('static bool isPpsspp=false;','static bool isPpsspp=false;\nstatic bool isDolphin=false;')
+          marker = 'static const char* ppssppOption(const char* key){'
+          dolphin_fn = '''static const char* dolphinOption(const char* key){
+              if(!key)return nullptr;
+              if(std::strcmp(key,"dolphin_cpu_core")==0)return "JITARM64";
+              if(std::strcmp(key,"dolphin_cpu_clock_rate")==0)return "100%";
+              if(std::strcmp(key,"dolphin_fastmem")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_dsp_hle")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_dsp_jit")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_emulation_speed")==0)return "100%";
+              if(std::strcmp(key,"dolphin_widescreen")==0)return "disabled";
+              if(std::strcmp(key,"dolphin_progressive_scan")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_pal60")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_enable_rumble")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_wiimote_continuous_scanning")==0)return "disabled";
+              if(std::strcmp(key,"dolphin_cheats_enabled")==0)return "disabled";
+              if(std::strcmp(key,"dolphin_osd_enabled")==0)return "enabled";
+              if(std::strcmp(key,"dolphin_log_level")==0)return "Error";
+              return nullptr;
+          }
+
+          '''
+          if 'dolphinOption(' not in h:
+              h = h.replace(marker, dolphin_fn + marker)
+          h = h.replace('v->value=isPpsspp?ppssppOption(v->key):nullptr;','v->value=isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr);')
+          h = h.replace('isPpsspp=false;shutdownRequested=false;','isPpsspp=false;isDolphin=false;shutdownRequested=false;')
+          h = h.replace('isPpsspp=path.find("ppsspp")!=std::string::npos;','isPpsspp=path.find("ppsspp")!=std::string::npos;isDolphin=path.find("dolphin")!=std::string::npos;')
+          host.write_text(h)
+          PY
+
+      - name: Validate external Dolphin launcher is gone
+        run: |
+          ! grep -R "Dolphin Emulator diperlukan\|DOWNLOAD DOLPHIN\|dolphin-emu.org/download\|DOLPHIN_PACKAGE" app/src/main/java/com/ric/emuhub
+          grep -q 'libdolphin_core.so' app/src/main/java/com/ric/emuhub/GameActivity.kt
+          grep -q '"dolphin"' app/src/main/java/com/ric/emuhub/MainActivity.kt
+
+      - name: Commit migration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt app/src/main/java/com/ric/emuhub/GameActivity.kt app/src/main/cpp/emuhost.cpp
+          git diff --cached --quiet || git commit -m "Use internal Dolphin libretro core for GameCube Wii"
+          git push
