@@ -1,6 +1,7 @@
 package com.ric.emuhub
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -35,6 +36,8 @@ class GameActivity : Activity() {
     private lateinit var stateFile: File
     private lateinit var gameProfile: GameProfile
     private var cleanedUp = false
+    private lateinit var currentRomPath: String
+    private var dolphinTuning = DolphinPerGameProfile()
     private lateinit var coreTraceFile: File
     private val coreTracePrefs by lazy { getSharedPreferences("core_runtime_trace", MODE_PRIVATE) }
 
@@ -44,6 +47,8 @@ class GameActivity : Activity() {
         super.onCreate(savedInstanceState)
         val rom = intent.getStringExtra("romPath") ?: run { finish(); return }
         val coreId = intent.getStringExtra("coreId") ?: "mgba"
+        currentRomPath = rom
+        if(coreId=="dolphin") dolphinTuning = DolphinPerGameSettings.load(this, rom)
         val romName = intent.getStringExtra("romName") ?: File(rom).name
         gameProfile = resolveGameProfile(coreId, romName)
         val coreFile = when (coreId) {
@@ -88,6 +93,7 @@ class GameActivity : Activity() {
             return
         }
         traceCoreStage("native_init", coreId, romName)
+        if(coreId=="dolphin"){ dolphinTuning=DolphinPerGameSettings.load(this,rom); gameProfile=gameProfile.copy(audioBufferScale=dolphinTuning.audioBufferScale); NativeBridge.configureDolphin(dolphinTuning.cpuClockPercent,dolphinTuning.presentDivisor,dolphinTuning.controllerDevice) }
         if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }
         traceCoreStage("native_init_ok", coreId, romName)
         if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)
@@ -146,9 +152,29 @@ class GameActivity : Activity() {
     private fun gameButton(label:String,id:Int,sizeDp:Int=58)=Button(this).apply{text=label;textSize=if(label.length>2)11f else 17f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;includeFontPadding=false;setPadding(0,0,0,0);background=roundBackground();alpha=.82f;setTextColor(0xFFFFFFFF.toInt());setOnTouchListener{v,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->{NativeBridge.setButton(id,true);v.alpha=1f};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{NativeBridge.setButton(id,false);v.alpha=.82f}};true}}
     private fun smallOverlayButton(label:String,onClick:(Button)->Unit)=Button(this).apply{text=label;textSize=10f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(8),0,dp(8),0);setTextColor(0xFFFFFFFF.toInt());background=translucentBackground(105,radiusDp=12);alpha=.78f;setOnClickListener{onClick(this)}}
 
+    private fun showDolphinTuningMenu(){
+        dolphinTuning=DolphinPerGameSettings.load(this,currentRomPath)
+        val controllerName=when(dolphinTuning.controllerDevice){0x201->"Wiimote Sideways";0x301->"Wiimote + Nunchuk";0x501->"Classic Pro";0x601->"GameCube Pad";else->"Classic Controller"}
+        val items=arrayOf(
+            "CPU Clock: ${dolphinTuning.cpuClockPercent}%",
+            "Presentasi: ${when(dolphinTuning.presentDivisor){1->"60 fps";2->"30 fps";else->"20 fps"}}",
+            "Audio Buffer: ${dolphinTuning.audioBufferScale}x",
+            "Controller: $controllerName",
+            "Reset ke default"
+        )
+        AlertDialog.Builder(this).setTitle("Dolphin Manual Tuning").setItems(items){_,which->when(which){
+            0->chooseDolphinCpu();1->chooseDolphinPresentation();2->chooseDolphinAudio();3->chooseDolphinController();4->{DolphinPerGameSettings.reset(this,currentRomPath);Toast.makeText(this,"Dolphin tuning direset. Restart game.",Toast.LENGTH_LONG).show()}
+        }}.setNegativeButton("Tutup",null).show()
+    }
+    private fun chooseDolphinCpu(){val values=intArrayOf(100,90,80,70,60);val labels=values.map{"$it%"}.toTypedArray();val checked=values.indexOf(dolphinTuning.cpuClockPercent).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("CPU Clock").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(cpuClockPercent=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"CPU ${values[w]}% tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
+    private fun chooseDolphinPresentation(){val values=intArrayOf(1,2,3);val labels=arrayOf("60 fps - paling halus, paling berat","30 fps - rekomendasi","20 fps - paling ringan");val checked=values.indexOf(dolphinTuning.presentDivisor).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Presentation / Readback").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(presentDivisor=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Presentation tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
+    private fun chooseDolphinAudio(){val values=intArrayOf(1,2,3);val labels=arrayOf("1x - latency rendah","2x - stabil","3x - anti putus");val checked=values.indexOf(dolphinTuning.audioBufferScale).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Audio Buffer").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(audioBufferScale=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Audio buffer tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
+    private fun chooseDolphinController(){val values=intArrayOf(0x401,0x301,0x201,0x501,0x601);val labels=arrayOf("Classic Controller","Wiimote + Nunchuk","Wiimote Sideways","Classic Controller Pro","GameCube Pad");val checked=values.indexOf(dolphinTuning.controllerDevice).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Wii Controller").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(controllerDevice=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Controller tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
+
     private fun buildGamepadOverlay(coreId:String):View{
         val overlay=FrameLayout(this);val tools=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
-        listOf("SAVE","LOAD","FAST","RESET").forEach{label->val b=smallOverlayButton(label){button->when(label){"SAVE"->Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show();"LOAD"->Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show();"FAST"->{fastForward=!fastForward;button.text=if(fastForward)"FAST ON" else "FAST";gameView?.onFastForwardChanged(fastForward)};"RESET"->NativeBridge.reset()}};tools.addView(b,LinearLayout.LayoutParams(dp(62),dp(34)).apply{marginEnd=dp(5)})}
+        val toolLabels=if(coreId=="dolphin") listOf("SAVE","LOAD","FAST","RESET","TUNE") else listOf("SAVE","LOAD","FAST","RESET")
+        toolLabels.forEach{label->val b=smallOverlayButton(label){button->when(label){"SAVE"->Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show();"LOAD"->Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show();"FAST"->{fastForward=!fastForward;button.text=if(fastForward)"FAST ON" else "FAST";gameView?.onFastForwardChanged(fastForward)};"RESET"->NativeBridge.reset();"TUNE"->showDolphinTuningMenu()}};tools.addView(b,LinearLayout.LayoutParams(dp(62),dp(34)).apply{marginEnd=dp(5)})}
         overlay.addView(tools,FrameLayout.LayoutParams(-2,dp(38),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=dp(8)})
         overlay.addView(gameButton("L",10,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.START).apply{leftMargin=dp(28);topMargin=dp(58)})
         overlay.addView(gameButton("R",11,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.END).apply{rightMargin=dp(28);topMargin=dp(58)})

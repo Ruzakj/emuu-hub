@@ -4,6 +4,7 @@ object NativeBridge {
     init { System.loadLibrary("emuhost") }
 
     external fun setLogPath(path: String)
+    external fun configureDolphin(cpuClockPercent: Int, presentDivisor: Int, controllerDevice: Int)
     external fun init(corePath: String, systemDir: String, saveDir: String): Boolean
     external fun setControllerDevice(device: Int)
     external fun loadGame(path: String): Boolean
