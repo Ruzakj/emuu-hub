@@ -1,0 +1,125 @@
+name: Patch Dolphin PBO Audio
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/patch-dolphin-pbo-audio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Dolphin async readback and audio pipeline fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          cpp=Path('app/src/main/cpp/emuhost.cpp')
+          s=cpp.read_text()
+
+          # Audio buffer: avoid O(n) erase/shifting on every Android audio pull.
+          if 'static size_t audioReadPos=0;' not in s:
+              s=s.replace('static std::vector<uint32_t> frame,rgbaScratch; static std::vector<int16_t> audioBuffer;',
+                          'static std::vector<uint32_t> frame,rgbaScratch; static std::vector<int16_t> audioBuffer; static size_t audioReadPos=0; static bool firstAudioBatch=true;',1)
+
+          # Double PBO state for GLES3 asynchronous GPU readback.
+          if 'static GLuint readbackPbo[2]' not in s:
+              anchor='static EGLDisplay eglDisplay=EGL_NO_DISPLAY;'
+              s=s.replace(anchor,'static GLuint readbackPbo[2]={0,0}; static int readbackPboIndex=0; static size_t readbackPboBytes=0;\n'+anchor,1)
+
+          # Audio callbacks with first-batch trace and bounded append.
+          s=re.sub(r'static void audioCb\(int16_t l,int16_t r\)\{audioBuffer\.push_back\(l\);audioBuffer\.push_back\(r\);\} static size_t audioBatchCb\(const int16_t\*d,size_t n\)\{if\(d&&n\)audioBuffer\.insert\(audioBuffer\.end\(\),d,d\+n\*2\);return n;\}',
+                   'static void audioCb(int16_t l,int16_t r){audioBuffer.push_back(l);audioBuffer.push_back(r);} static size_t audioBatchCb(const int16_t*d,size_t n){if(d&&n){if(firstAudioBatch){traceLine("audio: first batch");firstAudioBatch=false;}audioBuffer.insert(audioBuffer.end(),d,d+n*2);}return n;}',s,count=1)
+
+          # Replace synchronous glReadPixels capture with GLES3 double-PBO pipeline.
+          start=s.find('static void captureHw(unsigned w,unsigned h){')
+          end=s.find('\nstatic void videoCb(', start)
+          if start<0 or end<0: raise SystemExit('captureHw block not found')
+          new_capture=r'''static void captureHw(unsigned w,unsigned h){
+    if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}
+    if(!w||!h||w>1024||h>1024)return;
+    frameW=w;frameH=h;
+    const size_t bytes=(size_t)w*h*4;
+    if(!readbackPbo[0]){
+        glGenBuffers(2,readbackPbo);
+        readbackPboBytes=0;
+        readbackPboIndex=0;
+        traceLine("video: PBO async readback enabled");
+    }
+    if(readbackPboBytes!=bytes){
+        for(int i=0;i<2;i++){glBindBuffer(GL_PIXEL_PACK_BUFFER,readbackPbo[i]);glBufferData(GL_PIXEL_PACK_BUFFER,bytes,nullptr,GL_STREAM_READ);}
+        glBindBuffer(GL_PIXEL_PACK_BUFFER,0);
+        readbackPboBytes=bytes;
+        rgbaScratch.resize((size_t)w*h);
+        frame.resize((size_t)w*h);
+    }
+    const int cur=readbackPboIndex;
+    const int prev=1-cur;
+    GLint old=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&old);glBindFramebuffer(GL_FRAMEBUFFER,0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER,readbackPbo[cur]);
+    glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,(void*)0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER,readbackPbo[prev]);
+    void* mapped=glMapBufferRange(GL_PIXEL_PACK_BUFFER,0,bytes,GL_MAP_READ_BIT);
+    if(mapped){
+        const uint32_t* src=(const uint32_t*)mapped;
+        for(unsigned y=0;y<h;y++){unsigned sy=hwBottomLeft?h-1-y:y;for(unsigned x=0;x<w;x++){uint32_t p=src[(size_t)sy*w+x];frame[(size_t)y*w+x]=0xFF000000u|((p&255)<<16)|(p&0xFF00)|((p>>16)&255);}}
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        frameDirty=true;
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER,0);glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)old);
+    readbackPboIndex=prev;
+}'''
+          s=s[:start]+new_capture+s[end:]
+
+          # Reset audio/PBO session state on init.
+          s=s.replace('shutdownRequested=false;firstRun=true;firstCapture=true;frameDirty=false;dolphinPresentDiv=0;',
+                      'shutdownRequested=false;firstRun=true;firstCapture=true;frameDirty=false;dolphinPresentDiv=0;audioReadPos=0;firstAudioBatch=true;',1)
+
+          # Replace readAudio implementation with cursor-based draining.
+          s=re.sub(r'extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudio\(JNIEnv\*e,jobject,jshortArray out\)\{.*?return\(jint\)c;\}',
+                   '''extern "C" JNIEXPORT jint JNICALL Java_com_ric_emuhub_core_NativeBridge_readAudio(JNIEnv*e,jobject,jshortArray out){if(!out)return 0;if(audioReadPos>=audioBuffer.size()){audioBuffer.clear();audioReadPos=0;return 0;}size_t avail=audioBuffer.size()-audioReadPos;size_t c=std::min((size_t)e->GetArrayLength(out),avail);e->SetShortArrayRegion(out,0,(jsize)c,(const jshort*)(audioBuffer.data()+audioReadPos));audioReadPos+=c;if(audioReadPos>=32768&&audioReadPos*2>=audioBuffer.size()){audioBuffer.erase(audioBuffer.begin(),audioBuffer.begin()+(long)audioReadPos);audioReadPos=0;}return(jint)c;}''',s,count=1,flags=re.S)
+
+          # Clean PBOs before EGL context destruction where possible.
+          s=s.replace('if(eglContext!=EGL_NO_CONTEXT&&hwContextDestroy&&hwResetCalled&&makeHwCurrent())hwContextDestroy();releaseHwCurrent();',
+                      'if(eglContext!=EGL_NO_CONTEXT&&makeHwCurrent()){if(readbackPbo[0]){glDeleteBuffers(2,readbackPbo);readbackPbo[0]=readbackPbo[1]=0;readbackPboBytes=0;}if(hwContextDestroy&&hwResetCalled)hwContextDestroy();}releaseHwCurrent();',1)
+
+          cpp.write_text(s)
+
+          kt=Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          k=kt.read_text()
+          k=k.replace('val latencySensitive=coreId=="ppsspp"||coreId=="pcsx";',
+                      'val latencySensitive=coreId=="ppsspp"||coreId=="pcsx"||coreId=="dolphin";',1)
+          classic='private fun runClassicCore(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};drainAudioNonBlocking();nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*3)nextFrame=now}}'
+          if classic not in k: raise SystemExit('runClassicCore anchor not found')
+          dolphin='''private fun runDolphin(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)};nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*4)nextFrame=now}}\n        '''
+          k=k.replace(classic,dolphin+classic,1)
+          k=k.replace('if(coreId=="ppsspp")runPpsspp()else runClassicCore()',
+                      'if(coreId=="ppsspp")runPpsspp()else if(coreId=="dolphin")runDolphin()else runClassicCore()',1)
+          kt.write_text(k)
+          PY
+
+          git diff --check
+          grep -q 'PBO async readback enabled' app/src/main/cpp/emuhost.cpp
+          grep -q 'audio: first batch' app/src/main/cpp/emuhost.cpp
+          grep -q 'runDolphin' app/src/main/java/com/ric/emuhub/GameActivity.kt
+
+      - name: Commit PBO and audio fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/cpp/emuhost.cpp app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Use async PBO readback and fix Dolphin audio pacing'
+          git push origin main
