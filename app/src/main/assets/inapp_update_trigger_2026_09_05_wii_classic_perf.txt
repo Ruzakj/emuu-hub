@@ -1,0 +1,2 @@
+Trigger stable in-app update for Wii Classic Controller mapping and Dolphin performance defaults.
+Source fix commit: bdaa8e72e431f7a92e4b9de39d4f6e3af30964a4
