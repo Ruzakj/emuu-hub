@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Apply Dolphin first-frame native hotfix'
+    if: github.event.head_commit.message == 'Apply Dolphin first-frame native hotfix v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,35 +22,57 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('app/src/main/cpp/emuhost.cpp')
           s=p.read_text()
 
-          s=s.replace('ENV_GET_PREFERRED_HW_RENDER=56\n};','ENV_GET_PREFERRED_HW_RENDER=56, ENV_SET_HW_SHARED_CONTEXT=(44 | 0x10000)\n};',1)
+          if '#include <cstdio>' not in s:
+              s=s.replace('#include <ctime>\n','#include <ctime>\n#include <cstdio>\n',1)
 
-          s=s.replace('static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;',
-          'static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;\n    { char b[160]; std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0); traceLine(b); }',1)
+          if 'ENV_SET_HW_SHARED_CONTEXT' not in s:
+              s=s.replace('ENV_GET_PREFERRED_HW_RENDER=56\n};','ENV_GET_PREFERRED_HW_RENDER=56, ENV_SET_HW_SHARED_CONTEXT=(44 | 0x10000)\n};',1)
 
-          s=s.replace('LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    return true;',
-          'LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    traceLine("hw: EGL context registered");\n    return true;',1)
+          if 'hw: SET_HW_RENDER type=' not in s:
+              s=s.replace('static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;',
+              'static bool createHw(retro_hw_render_callback* cb){\n    if(!cb)return false;\n    { char b[160]; std::snprintf(b,sizeof(b),"hw: SET_HW_RENDER type=%d version=%u.%u depth=%d stencil=%d cache=%d",(int)cb->context_type,cb->version_major,cb->version_minor,cb->depth?1:0,cb->stencil?1:0,cb->cache_context?1:0); traceLine(b); }',1)
 
-          s=s.replace('case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));',
-          'case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));\n        case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;',1)
+          if 'hw: EGL context registered' not in s:
+              s=s.replace('LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    return true;',
+              'LOGI("Z9x HW context registered: GLES %u.%u reset pending after load_game",major,cb->version_minor);\n    traceLine("hw: EGL context registered");\n    return true;',1)
 
-          old='''    traceLine("init: retro_init ok");\n    if(hwEnabled&&hwContextReset&&!hwResetCalled){if(!makeHwCurrent()){LOGE("HW context failed after retro_init");return JNI_FALSE;}hwContextReset();hwResetCalled=true;glFinish();releaseHwCurrent();LOGI("HW context_reset completed after retro_init");}\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
-          new='''    traceLine("init: retro_init ok");\n    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n    if(p_retro_set_controller_port_device)p_retro_set_controller_port_device(0,wantsAnalog?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD);\n    traceLine("init: complete");'''
-          if old not in s:
-              raise SystemExit('retro_init reset anchor not found')
-          s=s.replace(old,new,1)
+          if 'SET_HW_SHARED_CONTEXT accepted' not in s:
+              s=s.replace('case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));',
+              'case ENV_SET_HW_RENDER:return createHw(reinterpret_cast<retro_hw_render_callback*>(data));\n        case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;',1)
 
-          old='''    if(hwEnabled&&!hwResetCalled){if(!makeHwCurrent()){LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}LOGI("Calling PPSSPP context_reset after retro_load_game");hwContextReset();hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();LOGI("PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x");}'''
-          new='''    if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();}'''
-          if old not in s:
-              raise SystemExit('post-load reset anchor not found')
-          s=s.replace(old,new,1)
+          # Replace only the eager post-retro_init reset statement, regardless of whitespace/content around it.
+          pat=r'(\s*traceLine\("init: retro_init ok"\);\n)\s*if\(hwEnabled&&hwContextReset&&!hwResetCalled\)\{[^\n]*HW context_reset completed after retro_init[^\n]*\}\n'
+          repl='''\\1    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n'''
+          s,n=re.subn(pat,repl,s,count=1)
+          if n==0 and 'init: hw reset deferred until load_game' not in s:
+              # Fallback: match the exact one-line if directly following retro_init trace.
+              s,n=re.subn(r'(traceLine\("init: retro_init ok"\);\n)\s*if\(hwEnabled&&hwContextReset&&!hwResetCalled\)\{[^\n]+\}\n',r'\1    if(hwEnabled&&hwContextReset&&!hwResetCalled) traceLine("init: hw reset deferred until load_game");\n',s,count=1)
+          if 'init: hw reset deferred until load_game' not in s:
+              raise SystemExit('could not defer eager retro_init reset')
 
-          # Trace HW-frame capture so black-screen-after-first-run is diagnosable.
-          s=s.replace('''static void captureHw(unsigned width,unsigned height){\n    if(width==0||height==0||width>1024||height>1024)return;''',
-          '''static void captureHw(unsigned width,unsigned height){\n    static bool firstCapture=true;\n    if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}\n    if(width==0||height==0||width>1024||height>1024)return;''',1)
+          # Replace post-load reset block using stable start/end markers.
+          if 'loadGame: before hw context_reset' not in s:
+              pat2=r'    if\(hwEnabled&&!hwResetCalled\)\{[^\n]*PPSSPP context_reset completed; handing EGL to EmuFrame-Z9x[^\n]*\}\n'
+              repl2='''    if(hwEnabled&&!hwResetCalled){traceLine("loadGame: before hw context_reset");if(!makeHwCurrent()){traceLine("loadGame: makeHwCurrent failed");LOGE("Failed to acquire EGL for post-load context_reset: 0x%x",eglGetError());return JNI_FALSE;}if(!hwContextReset){traceLine("loadGame: no hw context_reset callback");LOGE("HW renderer has no context_reset callback");releaseHwCurrent();return JNI_FALSE;}hwContextReset();traceLine("loadGame: hw context_reset ok");hwResetCalled=true;glViewport(0,0,1024,1024);glFinish();}\n'''
+              s,n2=re.subn(pat2,repl2,s,count=1)
+              if n2==0:
+                  # Generic fallback: first hwEnabled&&!hwResetCalled block in loadGame after failed check.
+                  marker='extern "C" JNIEXPORT jboolean JNICALL Java_com_ric_emuhub_core_NativeBridge_loadGame'
+                  pos=s.find(marker)
+                  if pos<0: raise SystemExit('loadGame function not found')
+                  head,tail=s[:pos],s[pos:]
+                  tail,n2=re.subn(r'    if\(hwEnabled&&!hwResetCalled\)\{[^\n]*\}\n',repl2,tail,count=1)
+                  s=head+tail
+              if 'loadGame: before hw context_reset' not in s:
+                  raise SystemExit('could not instrument post-load reset')
+
+          if 'video: first HW frame callback' not in s:
+              s=s.replace('static void captureHw(unsigned width,unsigned height){\n    if(width==0||height==0||width>1024||height>1024)return;',
+              'static void captureHw(unsigned width,unsigned height){\n    static bool firstCapture=true;\n    if(firstCapture){traceLine("video: first HW frame callback");firstCapture=false;}\n    if(width==0||height==0||width>1024||height>1024)return;',1)
 
           p.write_text(s)
           PY
