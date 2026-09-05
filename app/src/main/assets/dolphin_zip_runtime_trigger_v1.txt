@@ -1,0 +1,4 @@
+Dolphin first-frame hotfix v1
+- runtime Sys packaged as Dolphin/Sys.zip
+- streaming ZipInputStream extraction
+- stable APK must include libdolphin_core.so
