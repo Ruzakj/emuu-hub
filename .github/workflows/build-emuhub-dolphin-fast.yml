@@ -1,0 +1,70 @@
+name: Build Emu Hub Dolphin Fast
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - native-dolphin-2606a
+    paths:
+      - .github/workflows/build-emuhub-dolphin-fast.yml
+      - build.gradle.kts
+      - app/**
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: native-dolphin-2606a
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install host SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "platforms;android-36" "build-tools;36.0.0" "ndk;27.0.12077973"
+      - name: Download known-good Dolphin 2606a embedded AAR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/dolphin-art app/libs
+          gh api -H "Accept: application/vnd.github+json" /repos/${{ github.repository }}/actions/artifacts/9991894596/zip > /tmp/dolphin.zip
+          unzip -o /tmp/dolphin.zip -d /tmp/dolphin-art
+          AAR=$(find /tmp/dolphin-art -type f -name '*.aar' | head -1)
+          test -n "$AAR"
+          cp "$AAR" app/libs/dolphin-2606a-engine-arm64.aar
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libmain.so'
+          unzip -l "$AAR" | grep 'assets/Sys/GC/dsp_rom.bin'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+          validate-wrappers: false
+      - name: Build Emu Hub with embedded Dolphin
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Verify final APK
+        run: |
+          set -euxo pipefail
+          APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)
+          test -n "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libmain.so'
+          unzip -l "$APK" | grep 'assets/Sys/GC/dsp_rom.bin'
+          aapt dump xmltree "$APK" AndroidManifest.xml > /tmp/m.txt
+          grep -q 'com.ric.emuhub.EmuHubApp' /tmp/m.txt
+          grep -q 'org.dolphinemu.dolphinemu.activities.EmulationActivity' /tmp/m.txt
+          ! grep -q 'org.dolphinemu.dolphinemu.DolphinApplication' /tmp/m.txt
+          du -h "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmuHub-Dolphin2606a-debug-fast
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
