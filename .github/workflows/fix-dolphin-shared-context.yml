@@ -1,0 +1,41 @@
+name: Fix Dolphin Shared Context
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fix-dolphin-shared-context.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject unsupported shared context request
+        shell: bash
+        run: |
+          set -euxo pipefail
+          FILE=app/src/main/cpp/emuhost.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/cpp/emuhost.cpp')
+          s=p.read_text()
+          old='case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT accepted");return true;'
+          new='case ENV_SET_HW_SHARED_CONTEXT:traceLine("hw: SET_HW_SHARED_CONTEXT unsupported - forcing synchronous fallback");return false;'
+          if old not in s:
+              raise SystemExit('shared-context accept pattern not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          grep -F 'SET_HW_SHARED_CONTEXT unsupported - forcing synchronous fallback' "$FILE"
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/cpp/emuhost.cpp
+          git commit -m 'Force Dolphin synchronous GL fallback'
+          git push
