@@ -17,7 +17,7 @@ import java.util.UUID
 import java.util.zip.ZipFile
 
 object ArchiveHelper {
-    private val ROM_EXTENSIONS = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","xci","nsp","nro")
+    private val ROM_EXTENSIONS = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","gcm","rvz","wbfs","wia","wad","dol","elf","ciso","xci","nsp","nro")
     val ARCHIVE_EXTENSIONS = setOf("zip","7z","rar","tar","tgz","gz","bz2","xz","tbz2","txz")
     private const val MAX_ENTRIES = 4096
     private const val MAX_TOTAL_BYTES = 10L * 1024L * 1024L * 1024L

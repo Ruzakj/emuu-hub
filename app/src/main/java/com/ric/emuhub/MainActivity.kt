@@ -47,7 +47,8 @@ class MainActivity : Activity() {
         private const val KEY_PSP_RESOLUTION = "psp_resolution"
         private const val KEY_RECENT_PLAYED = "recent_played_v1"
 
-        private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","gcm","rvz","wbfs","wia","wad","dol")
+        private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","gcm","rvz","wbfs","wia","wad","dol","elf")
+        private val DOLPHIN = setOf("gcm","rvz","wbfs","wia","wad","dol","elf","ciso")
         private val SWITCH = setOf("xci","nsp","nro")
         private val ARCHIVES = ArchiveHelper.ARCHIVE_EXTENSIONS
         private val RECOGNIZED = INTERNAL + SWITCH + ARCHIVES
@@ -534,7 +535,7 @@ class MainActivity : Activity() {
             "PSP"->{writePspResolution(prefs.getString(KEY_PSP_RESOLUTION,"960x544")?:"960x544");copyAndLaunchInternal(uri,g.name,g.ext,"ppsspp")}
             "PS1"->copyAndLaunchInternal(uri,g.name,g.ext,"pcsx")
             "PS2"->launchPs2OrSetup(uri,g.name)
-            "GAMECUBE","WII"->copyAndLaunchInternal(uri,g.name,g.ext,"dolphin")
+            "GAMECUBE","WII"->launchDolphinNative(uri,g.name)
             "GBA","NES","SNES"->copyAndLaunchInternal(uri,g.name,g.ext,null)
             "SWITCH"->launchEden(uri)
             "ARCHIVE"->openArchive(uri,g.name)
@@ -550,9 +551,35 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->copyAndLaunchInternal(uri,name,ext,"dolphin");ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
-    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • Dolphin Core")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);else->copyAndLaunchInternal(uri,name,"iso","dolphin")}}.setNegativeButton("Batal",null).show()}
+    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in DOLPHIN->launchDolphinNative(uri,name);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
+    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • Dolphin Native 2606a")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);else->launchDolphinNative(uri,name)}}.setNegativeButton("Batal",null).show()}
     private fun showChdChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"chd","pcsx") else launchPs2OrSetup(uri,name)}.setNegativeButton("Batal",null).show()}
+
+    private fun launchDolphinNative(uri:Uri,name:String){
+        val file=directGameFile(uri)
+        if(file==null){
+            status.text="Dolphin • direct ROM path unavailable"
+            Toast.makeText(this,"GameCube/Wii ROM harus berada di penyimpanan internal/SD yang bisa diakses langsung.",Toast.LENGTH_LONG).show()
+            return
+        }
+        status.text="GameCube/Wii • Dolphin Native 2606a"
+        android.util.Log.i("EMU_ROUTER","GC/Wii -> Dolphin Native 2606a • ${file.absolutePath}")
+        DolphinNativeLauncher.launch(this,file).onFailure{e->
+            status.text="Dolphin gagal dijalankan"
+            Toast.makeText(this,"Dolphin Native gagal: ${e.message}",Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun launchExtractedDolphin(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
+        pendingArchiveSession=session.root
+        status.text="GameCube/Wii • Dolphin Native 2606a"
+        android.util.Log.i("EMU_ROUTER","Extracted GC/Wii -> Dolphin Native 2606a • ${rom.file.absolutePath}")
+        DolphinNativeLauncher.launch(this,rom.file,REQUEST_ARCHIVE_GAME).onFailure{e->
+            pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null
+            status.text="Dolphin gagal dijalankan"
+            Toast.makeText(this,"Dolphin Native gagal: ${e.message}",Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun launchPs2OrSetup(uri:Uri,name:String){
         if(Ps2BiosActivity.selectedBios(this)==null){
@@ -636,16 +663,18 @@ class MainActivity : Activity() {
             }
             "cso"->showExtractedPspResolutionChooser(session,rom)
             "ecm"->decodeExtractedEcm(session,rom)
+            in DOLPHIN->launchExtractedDolphin(session,rom)
             else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)
         }
     }
 
     private fun showExtractedIsoChooser(session:ArchiveHelper.Session,rom:ArchiveHelper.ExtractedRom){
-        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->
+        AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • Dolphin Native 2606a")){_,which->
             when(which){
                 0->launchTempInternalFile(rom.file,"pcsx",rom.displayName,session.root)
                 1->showExtractedPspResolutionChooser(session,rom)
-                else->launchExtractedPs2OrSetup(session,rom)
+                2->launchExtractedPs2OrSetup(session,rom)
+                else->launchExtractedDolphin(session,rom)
             }
         }.setNegativeButton("Batal"){_,_->session.root.deleteRecursively()}.setOnCancelListener{session.root.deleteRecursively()}.show()
     }
@@ -767,7 +796,7 @@ class MainActivity : Activity() {
         if(requestCode==REQUEST_ARCHIVE_GAME){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null;status.text="Temporary archive files deleted";return}
         if(resultCode!=RESULT_OK)return
         if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return}
-        if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
+        if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in DOLPHIN->launchDolphinNative(uri,name);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
     }
 
     override fun onDestroy(){scanExecutor.shutdownNow();super.onDestroy()}
