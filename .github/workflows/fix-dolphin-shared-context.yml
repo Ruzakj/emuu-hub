@@ -39,3 +39,5 @@ jobs:
           git add app/src/main/cpp/emuhost.cpp
           git commit -m 'Force Dolphin synchronous GL fallback'
           git push
+
+# trigger-v2
