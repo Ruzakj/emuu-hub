@@ -1,2 +1,0 @@
-Trigger canonical build and stable in-app update after fixing duplicate Dolphin runner compile failure.
-Source fix commit: 99a07689c6522345903193755819037ea4b9695c

@@ -1,7 +1,6 @@
 package com.ric.emuhub
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -36,8 +35,6 @@ class GameActivity : Activity() {
     private lateinit var stateFile: File
     private lateinit var gameProfile: GameProfile
     private var cleanedUp = false
-    private lateinit var currentRomPath: String
-    private var dolphinTuning = DolphinPerGameProfile()
     private lateinit var coreTraceFile: File
     private val coreTracePrefs by lazy { getSharedPreferences("core_runtime_trace", MODE_PRIVATE) }
 
@@ -47,8 +44,6 @@ class GameActivity : Activity() {
         super.onCreate(savedInstanceState)
         val rom = intent.getStringExtra("romPath") ?: run { finish(); return }
         val coreId = intent.getStringExtra("coreId") ?: "mgba"
-        currentRomPath = rom
-        if(coreId=="dolphin") dolphinTuning = DolphinPerGameSettings.load(this, rom)
         val romName = intent.getStringExtra("romName") ?: File(rom).name
         gameProfile = resolveGameProfile(coreId, romName)
         val coreFile = when (coreId) {
@@ -93,7 +88,6 @@ class GameActivity : Activity() {
             return
         }
         traceCoreStage("native_init", coreId, romName)
-        if(coreId=="dolphin"){ dolphinTuning=DolphinPerGameSettings.load(this,rom); gameProfile=gameProfile.copy(audioBufferScale=dolphinTuning.audioBufferScale); NativeBridge.configureDolphin(dolphinTuning.cpuClockPercent,dolphinTuning.presentDivisor,dolphinTuning.controllerDevice) }
         if (!NativeBridge.init(corePath, systemRoot.absolutePath, saveDir.absolutePath)) { traceCoreStage("native_init_failed", coreId, romName, false); showLoadError("$coreLabel core gagal inisialisasi. Log: emu-hub/CORE/core-runtime.log"); return }
         traceCoreStage("native_init_ok", coreId, romName)
         if (coreId == "ppsspp") NativeBridge.setControllerDevice(1)
@@ -131,7 +125,7 @@ class GameActivity : Activity() {
             coreId=="pcsx" && ("final fantasy ix" in n || "final fantasy 9" in n || "ff9" in n) -> GameProfile("ps1-rpg","Z9x PS1 RPG",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="ppsspp" -> GameProfile("psp-balanced","Z9x PSP Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
-            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",1,Process.THREAD_PRIORITY_URGENT_DISPLAY,false)
+            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             else -> GameProfile("classic","Classic",3,Process.THREAD_PRIORITY_DISPLAY,true)
         }
     }
@@ -152,29 +146,9 @@ class GameActivity : Activity() {
     private fun gameButton(label:String,id:Int,sizeDp:Int=58)=Button(this).apply{text=label;textSize=if(label.length>2)11f else 17f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;includeFontPadding=false;setPadding(0,0,0,0);background=roundBackground();alpha=.82f;setTextColor(0xFFFFFFFF.toInt());setOnTouchListener{v,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->{NativeBridge.setButton(id,true);v.alpha=1f};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{NativeBridge.setButton(id,false);v.alpha=.82f}};true}}
     private fun smallOverlayButton(label:String,onClick:(Button)->Unit)=Button(this).apply{text=label;textSize=10f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(8),0,dp(8),0);setTextColor(0xFFFFFFFF.toInt());background=translucentBackground(105,radiusDp=12);alpha=.78f;setOnClickListener{onClick(this)}}
 
-    private fun showDolphinTuningMenu(){
-        dolphinTuning=DolphinPerGameSettings.load(this,currentRomPath)
-        val controllerName=when(dolphinTuning.controllerDevice){0x201->"Wiimote Sideways";0x301->"Wiimote + Nunchuk";0x501->"Classic Pro";0x601->"GameCube Pad";else->"Classic Controller"}
-        val items=arrayOf(
-            "CPU Clock: ${dolphinTuning.cpuClockPercent}%",
-            "Presentasi: ${when(dolphinTuning.presentDivisor){1->"60 fps";2->"30 fps";else->"20 fps"}}",
-            "Audio Buffer: ${dolphinTuning.audioBufferScale}x",
-            "Controller: $controllerName",
-            "Reset ke default"
-        )
-        AlertDialog.Builder(this).setTitle("Dolphin Manual Tuning").setItems(items){_,which->when(which){
-            0->chooseDolphinCpu();1->chooseDolphinPresentation();2->chooseDolphinAudio();3->chooseDolphinController();4->{DolphinPerGameSettings.reset(this,currentRomPath);Toast.makeText(this,"Dolphin tuning direset. Restart game.",Toast.LENGTH_LONG).show()}
-        }}.setNegativeButton("Tutup",null).show()
-    }
-    private fun chooseDolphinCpu(){val values=intArrayOf(100,90,80,70,60);val labels=values.map{"$it%"}.toTypedArray();val checked=values.indexOf(dolphinTuning.cpuClockPercent).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("CPU Clock").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(cpuClockPercent=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"CPU ${values[w]}% tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
-    private fun chooseDolphinPresentation(){val values=intArrayOf(1,2,3);val labels=arrayOf("60 fps - paling halus, paling berat","30 fps - rekomendasi","20 fps - paling ringan");val checked=values.indexOf(dolphinTuning.presentDivisor).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Presentation / Readback").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(presentDivisor=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Presentation tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
-    private fun chooseDolphinAudio(){val values=intArrayOf(1,2,3);val labels=arrayOf("1x - latency rendah","2x - stabil","3x - anti putus");val checked=values.indexOf(dolphinTuning.audioBufferScale).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Audio Buffer").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(audioBufferScale=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Audio buffer tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
-    private fun chooseDolphinController(){val values=intArrayOf(0x401,0x301,0x201,0x501,0x601);val labels=arrayOf("Classic Controller","Wiimote + Nunchuk","Wiimote Sideways","Classic Controller Pro","GameCube Pad");val checked=values.indexOf(dolphinTuning.controllerDevice).coerceAtLeast(0);AlertDialog.Builder(this).setTitle("Wii Controller").setSingleChoiceItems(labels,checked){d,w->dolphinTuning=dolphinTuning.copy(controllerDevice=values[w]);DolphinPerGameSettings.save(this,currentRomPath,dolphinTuning);d.dismiss();Toast.makeText(this,"Controller tersimpan. Restart game.",Toast.LENGTH_LONG).show()}.show()}
-
     private fun buildGamepadOverlay(coreId:String):View{
         val overlay=FrameLayout(this);val tools=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
-        val toolLabels=if(coreId=="dolphin") listOf("SAVE","LOAD","FAST","RESET","TUNE") else listOf("SAVE","LOAD","FAST","RESET")
-        toolLabels.forEach{label->val b=smallOverlayButton(label){button->when(label){"SAVE"->Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show();"LOAD"->Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show();"FAST"->{fastForward=!fastForward;button.text=if(fastForward)"FAST ON" else "FAST";gameView?.onFastForwardChanged(fastForward)};"RESET"->NativeBridge.reset();"TUNE"->showDolphinTuningMenu()}};tools.addView(b,LinearLayout.LayoutParams(dp(62),dp(34)).apply{marginEnd=dp(5)})}
+        listOf("SAVE","LOAD","FAST","RESET").forEach{label->val b=smallOverlayButton(label){button->when(label){"SAVE"->Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show();"LOAD"->Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show();"FAST"->{fastForward=!fastForward;button.text=if(fastForward)"FAST ON" else "FAST";gameView?.onFastForwardChanged(fastForward)};"RESET"->NativeBridge.reset()}};tools.addView(b,LinearLayout.LayoutParams(dp(62),dp(34)).apply{marginEnd=dp(5)})}
         overlay.addView(tools,FrameLayout.LayoutParams(-2,dp(38),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=dp(8)})
         overlay.addView(gameButton("L",10,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.START).apply{leftMargin=dp(28);topMargin=dp(58)})
         overlay.addView(gameButton("R",11,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.END).apply{rightMargin=dp(28);topMargin=dp(58)})
@@ -258,15 +232,14 @@ class GameActivity : Activity() {
         private val audioScratch=ShortArray(16384);private var audioTrack:AudioTrack?=null
         private val framePeriodNs:Long=when(coreId){"mgba"->16_742_706L;"fceumm","snes9x"->16_639_267L;"pcsx"->16_683_350L;else->16_666_667L}
 
-        fun start(){val rate=NativeBridge.getSampleRate().coerceAtLeast(8000);val minBuffer=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096);val latencySensitive=coreId=="ppsspp"||coreId=="pcsx"||coreId=="dolphin";val bufferBytes=if(latencySensitive)maxOf(minBuffer*profile.audioBufferScale,rate*4/12)else maxOf(minBuffer*3,rate*4/8);val builder=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()).setBufferSizeInBytes(bufferBytes).setTransferMode(AudioTrack.MODE_STREAM);if(latencySensitive&&Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);audioTrack=builder.build().also{it.play()};if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame-Z9x-${profile.id}").also{it.start()}}
+        fun start(){val rate=NativeBridge.getSampleRate().coerceAtLeast(8000);val minBuffer=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096);val latencySensitive=coreId=="ppsspp"||coreId=="pcsx";val bufferBytes=if(latencySensitive)maxOf(minBuffer*profile.audioBufferScale,rate*4/12)else maxOf(minBuffer*3,rate*4/8);val builder=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build()).setBufferSizeInBytes(bufferBytes).setTransferMode(AudioTrack.MODE_STREAM);if(latencySensitive&&Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);audioTrack=builder.build().also{it.play()};if(running.compareAndSet(false,true))thread=Thread(this,"EmuFrame-Z9x-${profile.id}").also{it.start()}}
         fun onFastForwardChanged(enabled:Boolean){try{audioTrack?.pause();audioTrack?.flush();if(!enabled)audioTrack?.play()}catch(_:Exception){}}
         fun stop(){if(!running.getAndSet(false))return;try{audioTrack?.pause();audioTrack?.flush()}catch(_:Exception){};thread?.interrupt();try{thread?.join(1500)}catch(_:Exception){};try{audioTrack?.stop()}catch(_:Exception){};audioTrack?.release();audioTrack=null;thread=null}
         private fun updateVideo(){val w=NativeBridge.getWidth().coerceIn(1,1024);val h=NativeBridge.getHeight().coerceIn(1,1024);if(w*h<=pixels.size){if(w!=frameW||h!=frameH){frameW=w;frameH=h;bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)};bitmap.setPixels(pixels,0,w,0,0,w,h);postInvalidate()}}
         private fun drainAudioNonBlocking(){var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_NON_BLOCKING)?:-1;if(z>0)off+=z else break};if(off<count)break;count=NativeBridge.readAudio(audioScratch)}}
         private fun runPpsspp(){while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};try{Thread.sleep(8)}catch(_:Exception){break}}else{var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)}}}}
-        private fun runDolphin(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};var count=NativeBridge.readAudio(audioScratch);while(count>0&&running.get()){var off=0;while(off<count&&running.get()){val z=audioTrack?.write(audioScratch,off,count-off,AudioTrack.WRITE_BLOCKING)?:-1;if(z>0)off+=z else break};count=NativeBridge.readAudio(audioScratch)};nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*4)nextFrame=now}}
         private fun runClassicCore(){var nextFrame=System.nanoTime();while(running.get()){val n=NativeBridge.runFrame(pixels);if(n<0){running.set(false);break};if(n>0)updateVideo();if(fastForward){while(NativeBridge.readAudio(audioScratch)>0){};nextFrame=System.nanoTime();continue};drainAudioNonBlocking();nextFrame+=framePeriodNs;val now=System.nanoTime();val waitNs=nextFrame-now;if(waitNs>0)LockSupport.parkNanos(waitNs)else if(waitNs < -framePeriodNs*3)nextFrame=now}}
-        override fun run(){runCatching{Process.setThreadPriority(profile.priority)};if(coreId=="ppsspp")runPpsspp()else if(coreId=="dolphin")runDolphin()else runClassicCore()}
+        override fun run(){runCatching{Process.setThreadPriority(profile.priority)};if(coreId=="ppsspp")runPpsspp()else runClassicCore()}
         override fun onDraw(c:Canvas){super.onDraw(c);val w=frameW.coerceAtLeast(1);val h=frameH.coerceAtLeast(1);val scale=minOf(width.toFloat()/w,height.toFloat()/h);val dw=w*scale;val dh=h*scale;c.drawBitmap(bitmap,null,android.graphics.RectF((width-dw)/2f,(height-dh)/2f,(width+dw)/2f,(height+dh)/2f),paint)}
     }
 }

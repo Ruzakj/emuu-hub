@@ -1,2 +1,0 @@
-Trigger stable in-app update for Dolphin synchronous GL fallback.
-Shared-context request is now rejected because the host does not implement a real shared EGL context.
