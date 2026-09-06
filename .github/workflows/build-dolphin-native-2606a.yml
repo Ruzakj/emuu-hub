@@ -63,6 +63,7 @@ jobs:
           s=s.replace('    alias(libs.plugins.androidx.baselineprofile)\n', '')
           s=s.replace('    baselineProfile(project(":benchmark"))\n', '')
           s=s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
+          s=s.replace('        targetSdk = 36\n', '')
           s=s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
 
           start=s.find('    signingConfigs {')
@@ -79,7 +80,7 @@ jobs:
           s=s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
           p.write_text(s)
           PY
-          grep -nE 'android.library|applicationId|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts
+          grep -nE 'android.library|applicationId|targetSdk|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts || true
 
       - name: Build Dolphin ARM64 AAR
         shell: bash
