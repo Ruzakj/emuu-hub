@@ -102,8 +102,6 @@ jobs:
           x = x.replace('<string name="slider_setting_float_value">%.2f%2$s</string>', '<string name="slider_setting_float_value">%1$.2f%2$s</string>')
           strings.write_text(x)
 
-          # Dolphin's upstream Application is adapted into an explicit bootstrap helper.
-          # Emu Hub remains the only Android Application object and launcher package.
           app = root / 'src/main/java/org/dolphinemu/dolphinemu/DolphinApplication.kt'
           app.write_text(r'''// SPDX-License-Identifier: GPL-2.0-or-later
           package org.dolphinemu.dolphinemu
@@ -156,8 +154,6 @@ jobs:
           }
           '''.replace('          ', ''))
 
-          # Keep Dolphin's emulation/support Activities but remove its second app identity,
-          # launcher, TV launcher, sync services and document providers from the library manifest.
           manifest = root / 'src/main/AndroidManifest.xml'
           ANDROID = '{http://schemas.android.com/apk/res/android}'
           ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
@@ -180,14 +176,12 @@ jobs:
           for child in list(application):
               if child.tag == 'activity' and child.attrib.get(ANDROID + 'name') in keep_activities:
                   child.attrib[ANDROID + 'exported'] = 'false'
-                  # Custom picker must not advertise itself globally inside Emu Hub.
                   for filt in list(child.findall('intent-filter')):
                       child.remove(filt)
                   continue
               application.remove(child)
           tree.write(manifest, encoding='utf-8', xml_declaration=True)
 
-          # Add high-signal runtime breadcrumbs without altering Dolphin's core behavior.
           fragment = root / 'src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt'
           f = fragment.read_text()
           f = f.replace('NativeLibrary.SurfaceChanged(holder.surface)', 'android.util.Log.i("DOLPHIN_VIDEO", "Surface attached ${width}x${height}")\n        NativeLibrary.SurfaceChanged(holder.surface)')
@@ -198,8 +192,6 @@ jobs:
           PY
 
           grep -nE 'android.library|VERSION_NAME|APPLICATION_ID|app_name_suffixed|abiFilters' .native-dolphin-src/Source/Android/app/build.gradle.kts
-          grep -n 'fun initialize(application' .native-dolphin-src/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/DolphinApplication.kt
-          grep -n 'DOLPHIN_VIDEO\|DOLPHIN_BOOT' .native-dolphin-src/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt
           ! grep -q 'android.intent.category.LAUNCHER' .native-dolphin-src/Source/Android/app/src/main/AndroidManifest.xml
           ! grep -q 'DolphinApplication' .native-dolphin-src/Source/Android/app/src/main/AndroidManifest.xml
 
@@ -230,17 +222,17 @@ jobs:
           grep -q 'org.dolphinemu.dolphinemu.activities.EmulationActivity' /tmp/dolphin-aar-manifest.xml
           sha256sum "$AAR" | tee native-dolphin/out/dolphin-2606a-engine-arm64.aar.sha256
 
-      - name: Upload embeddable engine artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dolphin-2606a-engine-arm64
-          path: native-dolphin/out/*
-          retention-days: 7
+      - name: Remove foreign Gradle wrapper jars
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find .native-dolphin-src -path '*/gradle/wrapper/gradle-wrapper.jar' -delete
 
       - name: Setup Gradle for Emu Hub
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+          validate-wrappers: false
 
       - name: Build Emu Hub with embedded Dolphin
         shell: bash
