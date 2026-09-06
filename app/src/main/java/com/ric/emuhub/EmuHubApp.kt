@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import android.util.Log
 import android.widget.Toast
 import java.io.File
 import java.io.PrintWriter
@@ -38,6 +39,12 @@ class EmuHubApp : Application() {
             EnginePackManager.bootstrapAsync(this)
             Thread({ runCatching { StoragePaths.ensureLayout(applicationContext) } }, "emuhub-storage-init").start()
             StorageMaintenance.runAsync(this)
+
+            // The Dolphin AAR is staged by CI and is intentionally not checked into git.
+            // Initialization is reflection-based so secondary emulator processes remain isolated.
+            DolphinNativeLauncher.initialize(this).onFailure {
+                Log.w("DOLPHIN_HOST", "Embedded Dolphin runtime not available during app init", it)
+            }
         } else if (!isPs2Process) {
             Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
         }
