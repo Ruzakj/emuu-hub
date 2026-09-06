@@ -1,0 +1,122 @@
+name: Build Dolphin Native 2606a
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ native-dolphin-2606a ]
+    paths:
+      - 'app/src/main/java/com/ric/emuhub/DolphinSettingsActivity.kt'
+      - '.github/workflows/build-dolphin-native-2606a.yml'
+      - 'native-dolphin/**'
+
+permissions:
+  contents: write
+
+env:
+  DOLPHIN_TAG: 2606a
+
+jobs:
+  build-dolphin-aar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: native-dolphin-2606a
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Dolphin Android toolchain
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.14206865' 'cmake;3.22.1'
+
+      - name: Checkout official Dolphin 2606a
+        run: |
+          rm -rf .native-dolphin-src
+          git clone --branch "$DOLPHIN_TAG" --depth 1 --recurse-submodules https://github.com/dolphin-emu/dolphin.git .native-dolphin-src
+          git -C .native-dolphin-src rev-parse HEAD
+          git -C .native-dolphin-src describe --tags --always
+
+      - name: Convert Dolphin Android app module to embeddable AAR
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.native-dolphin-src/Source/Android/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
+          s=s.replace('    alias(libs.plugins.androidx.baselineprofile)\n', '')
+          s=s.replace('    baselineProfile(project(":benchmark"))\n', '')
+          s=s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
+          s=s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
+          # Library modules cannot use APK signing/application suffixes.
+          start=s.find('    signingConfigs {')
+          end=s.find('    // Define build types', start)
+          if start != -1 and end != -1:
+              s=s[:start]+s[end:]
+          old='''        release {
+            if (project.hasProperty("keystore")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+
+            resValue("string", "app_name_suffixed", "Dolphin Emulator")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+
+        // Signed by debug key disallowing distribution on Play Store.
+        // Attaches "debug" suffix to version and package name, allowing installation alongside the release build.
+        debug {
+            resValue("string", "app_name_suffixed", "Dolphin Debug")
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            isJniDebuggable = true
+        }
+'''
+          new='''        release {
+            resValue("string", "app_name_suffixed", "Dolphin Engine")
+            isMinifyEnabled = false
+        }
+        debug {
+            resValue("string", "app_name_suffixed", "Dolphin Engine Debug")
+            isJniDebuggable = true
+        }
+'''
+          if old not in s:
+              raise SystemExit('Dolphin 2606a build.gradle layout changed')
+          s=s.replace(old,new,1)
+          # Keep only ARM64 for Emu Hub / iQOO Z9x.
+          s=s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
+          p.write_text(s)
+          PY
+          grep -n 'android.library\|abiFilters\|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts
+
+      - name: Build Dolphin native AAR
+        working-directory: .native-dolphin-src/Source/Android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Stage Dolphin engine artifact
+        run: |
+          mkdir -p native-dolphin/out
+          AAR=$(find .native-dolphin-src/Source/Android/app/build/outputs/aar -name '*release*.aar' | head -1)
+          test -n "$AAR"
+          cp "$AAR" native-dolphin/out/dolphin-2606a-arm64.aar
+          unzip -l native-dolphin/out/dolphin-2606a-arm64.aar | grep -E 'classes.jar|jni/arm64-v8a/.+\.so' | head -50
+          sha256sum native-dolphin/out/dolphin-2606a-arm64.aar > native-dolphin/out/dolphin-2606a-arm64.aar.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dolphin-native-2606a-arm64
+          path: native-dolphin/out/*
+          retention-days: 7
