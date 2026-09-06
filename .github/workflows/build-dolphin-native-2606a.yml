@@ -17,7 +17,7 @@ env:
   DOLPHIN_TAG: 2606a
 
 jobs:
-  validate-and-build:
+  build-embeddable-engine:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -51,7 +51,37 @@ jobs:
           git -C .native-dolphin-src rev-parse HEAD
           git -C .native-dolphin-src describe --tags --always
 
-      - name: Build official Dolphin Android ARM64 release
+      - name: Convert official Android app module to AAR library
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.native-dolphin-src/Source/Android/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
+          s=s.replace('    alias(libs.plugins.androidx.baselineprofile)\n', '')
+          s=s.replace('    baselineProfile(project(":benchmark"))\n', '')
+          s=s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
+          s=s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
+
+          start=s.find('    signingConfigs {')
+          end=s.find('    // Define build types', start)
+          if start != -1 and end != -1:
+              s=s[:start]+s[end:]
+
+          start=s.find('    buildTypes {')
+          end=s.find('    externalNativeBuild {', start)
+          if start == -1 or end == -1:
+              raise SystemExit('Unable to locate Dolphin buildTypes block')
+          replacement='''    buildTypes {\n        release {\n            isMinifyEnabled = false\n        }\n        debug {\n            isJniDebuggable = true\n        }\n    }\n'''
+          s=s[:start]+replacement+s[end:]
+          s=s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
+          p.write_text(s)
+          PY
+          grep -nE 'android.library|applicationId|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts
+
+      - name: Build Dolphin ARM64 AAR
         shell: bash
         working-directory: .native-dolphin-src/Source/Android
         run: |
@@ -59,20 +89,20 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      - name: Inspect native ARM64 libraries
+      - name: Inspect and stage engine
         shell: bash
         run: |
           set -euxo pipefail
-          APK=$(find .native-dolphin-src/Source/Android/app/build/outputs/apk/release -name '*.apk' | head -1)
-          test -n "$APK"
+          AAR=$(find .native-dolphin-src/Source/Android/app/build/outputs/aar -name '*release*.aar' | head -1)
+          test -n "$AAR"
           mkdir -p native-dolphin/out
-          cp "$APK" native-dolphin/out/dolphin-2606a-upstream-arm64.apk
-          unzip -l "$APK" | grep 'lib/arm64-v8a/.*\.so' | head -100
-          sha256sum native-dolphin/out/dolphin-2606a-upstream-arm64.apk > native-dolphin/out/dolphin-2606a-upstream-arm64.apk.sha256
+          cp "$AAR" native-dolphin/out/dolphin-2606a-engine-arm64.aar
+          unzip -l "$AAR" | grep -E 'classes.jar|jni/arm64-v8a/.*\.so|AndroidManifest.xml' | head -120
+          sha256sum native-dolphin/out/dolphin-2606a-engine-arm64.aar > native-dolphin/out/dolphin-2606a-engine-arm64.aar.sha256
 
-      - name: Upload validation artifact
+      - name: Upload embeddable engine artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dolphin-2606a-upstream-arm64
+          name: dolphin-2606a-engine-arm64
           path: native-dolphin/out/*
           retention-days: 7
