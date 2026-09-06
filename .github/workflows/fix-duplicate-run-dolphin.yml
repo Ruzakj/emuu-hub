@@ -1,0 +1,46 @@
+name: Fix Duplicate Dolphin Runner
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-duplicate-run-dolphin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove duplicate runDolphin definitions
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          lines = p.read_text().splitlines()
+          seen = 0
+          out = []
+          for line in lines:
+              if 'private fun runDolphin(){' in line:
+                  seen += 1
+                  if seen > 1:
+                      continue
+              out.append(line)
+          if seen < 2:
+              raise SystemExit(f'Expected duplicate runDolphin definitions, found {seen}')
+          p.write_text('\n'.join(out) + '\n')
+          print(f'Removed {seen-1} duplicate runDolphin definitions')
+      - name: Verify exactly one Dolphin runner
+        run: |
+          test "$(grep -c 'private fun runDolphin(){' app/src/main/java/com/ric/emuhub/GameActivity.kt)" -eq 1
+      - name: Commit source fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/ric/emuhub/GameActivity.kt
+          git commit -m 'Fix duplicate Dolphin runner compile failure'
+          git push
