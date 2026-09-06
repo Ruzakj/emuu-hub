@@ -19,14 +19,10 @@ android {
         externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
     }
 
-    buildFeatures {
-        buildConfig = true
-    }
+    buildFeatures { buildConfig = true }
 
     packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
+        jniLibs { useLegacyPackaging = true }
     }
 
     signingConfigs {
@@ -98,7 +94,7 @@ dependencies {
 
     implementation(files("libs/jlmod-runtime.aar"))
     implementation(files("libs/jlmod-dexlib.aar"))
-    implementation("androidx.databinding:viewbinding:8.7.3")
+    implementation("androidx.databinding:viewbinding:8.9.1")
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.arch.core:core-common:2.2.0")
     implementation("androidx.collection:collection-ktx:1.3.0")
