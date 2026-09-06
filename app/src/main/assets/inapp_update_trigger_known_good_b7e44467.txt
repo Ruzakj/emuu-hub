@@ -1,0 +1,3 @@
+Force stable in-app update publication from the last known working Dolphin baseline.
+Baseline source tree: b7e44467a4eadfecb735e3bb2d6cb3d607118172
+Rollback commit: e96994b2ae367b6a4efbc8e6461028db364f5a06
