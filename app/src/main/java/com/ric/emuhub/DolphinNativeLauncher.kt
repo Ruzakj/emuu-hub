@@ -45,7 +45,8 @@ object DolphinNativeLauncher {
         }
     }
 
-    fun launch(activity: Activity, rom: File): Result<Unit> = runCatching {
+    @Suppress("DEPRECATION")
+    fun launch(activity: Activity, rom: File, requestCode: Int? = null): Result<Unit> = runCatching {
         require(rom.isFile && rom.canRead()) { "ROM tidak dapat dibaca: ${rom.absolutePath}" }
         initialize(activity.application).getOrThrow()
         val clazz = Class.forName(EMULATION_ACTIVITY)
@@ -54,7 +55,8 @@ object DolphinNativeLauncher {
             putExtra(EXTRA_SELECTED_GAMES, arrayOf(rom.absolutePath))
             putExtra(EXTRA_RIIVOLUTION, false)
         }
-        activity.startActivity(intent)
+        if (requestCode == null) activity.startActivity(intent)
+        else activity.startActivityForResult(intent, requestCode)
     }.onFailure {
         Log.e(TAG_BOOT, "Failed to launch Dolphin internal game", it)
     }
