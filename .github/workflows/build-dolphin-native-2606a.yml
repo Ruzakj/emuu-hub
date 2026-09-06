@@ -8,7 +8,13 @@ on:
     paths:
       - .github/workflows/build-dolphin-native-2606a.yml
       - native-dolphin/**
+      - app/build.gradle.kts
+      - app/src/main/AndroidManifest.xml
+      - app/src/main/java/com/ric/emuhub/DolphinNativeLauncher.kt
       - app/src/main/java/com/ric/emuhub/DolphinSettingsActivity.kt
+      - app/src/main/java/com/ric/emuhub/EmuHubApp.kt
+      - app/src/main/java/com/ric/emuhub/MainActivity.kt
+      - app/src/main/java/com/ric/emuhub/ArchiveHelper.kt
 
 permissions:
   contents: read
@@ -40,7 +46,7 @@ jobs:
         run: |
           set -euxo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+          sdkmanager "platforms;android-35" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "ndk;27.0.12077973" "cmake;3.22.1"
 
       - name: Checkout Dolphin 2606a
         shell: bash
@@ -48,55 +54,154 @@ jobs:
           set -euxo pipefail
           rm -rf .native-dolphin-src
           git clone --branch "$DOLPHIN_TAG" --depth 1 --recurse-submodules https://github.com/dolphin-emu/dolphin.git .native-dolphin-src
-          git -C .native-dolphin-src rev-parse HEAD
+          test "$(git -C .native-dolphin-src rev-parse HEAD)" = "c77bbaa0f372c3f72281602a8b087206706542cb"
           git -C .native-dolphin-src describe --tags --always
 
-      - name: Convert official Android app module to AAR library
+      - name: Convert official Android module to embedded library
         shell: bash
         run: |
           set -euxo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
+          import xml.etree.ElementTree as ET
 
-          p=Path('.native-dolphin-src/Source/Android/app/build.gradle.kts')
-          s=p.read_text()
-          s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
-          s=s.replace('    alias(libs.plugins.androidx.baselineprofile)\n', '')
-          s=s.replace('    baselineProfile(project(":benchmark"))\n', '')
-          s=s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
-          s=s.replace('        targetSdk = 36\n', '')
-          s=s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
+          root = Path('.native-dolphin-src/Source/Android/app')
+          gradle = root / 'build.gradle.kts'
+          s = gradle.read_text()
+          s = s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
+          s = s.replace('    alias(libs.plugins.androidx.baselineprofile)\n', '')
+          s = s.replace('    baselineProfile(project(":benchmark"))\n', '')
+          s = s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
+          s = s.replace('        targetSdk = 36\n', '')
+          s = s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
 
-          marker='        buildConfigField("String", "BRANCH", "\\\"${getBranch()}\\\"")\n'
+          marker = '        buildConfigField("String", "BRANCH", "\\\"${getBranch()}\\\"")\n'
           if marker not in s:
               raise SystemExit('Unable to locate Dolphin BuildConfig marker')
-          s=s.replace(marker, marker +
+          s = s.replace(marker, marker +
               '        buildConfigField("String", "VERSION_NAME", "\\\"2606a\\\"")\n' +
               '        buildConfigField("String", "APPLICATION_ID", "\\\"org.dolphinemu.dolphinemu\\\"")\n')
 
-          start=s.find('    signingConfigs {')
-          end=s.find('    // Define build types', start)
+          start = s.find('    signingConfigs {')
+          end = s.find('    // Define build types', start)
           if start != -1 and end != -1:
-              s=s[:start]+s[end:]
+              s = s[:start] + s[end:]
 
-          start=s.find('    buildTypes {')
-          end=s.find('    externalNativeBuild {', start)
+          start = s.find('    buildTypes {')
+          end = s.find('    externalNativeBuild {', start)
           if start == -1 or end == -1:
               raise SystemExit('Unable to locate Dolphin buildTypes block')
-          replacement='''    buildTypes {\n        release {\n            resValue("string", "app_name_suffixed", "Dolphin Emulator")\n            isMinifyEnabled = false\n        }\n        debug {\n            resValue("string", "app_name_suffixed", "Dolphin Debug")\n            isJniDebuggable = true\n        }\n    }\n'''
-          s=s[:start]+replacement+s[end:]
-          s=s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
-          p.write_text(s)
+          replacement = '''    buildTypes {\n        release {\n            resValue("string", "app_name_suffixed", "Dolphin Emulator")\n            isMinifyEnabled = false\n        }\n        debug {\n            resValue("string", "app_name_suffixed", "Dolphin Debug")\n            isJniDebuggable = true\n        }\n    }\n'''
+          s = s[:start] + replacement + s[end:]
+          s = s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
+          gradle.write_text(s)
 
-          strings=Path('.native-dolphin-src/Source/Android/app/src/main/res/values/strings.xml')
-          x=strings.read_text()
-          x=x.replace('<string name="slider_setting_value">%.0f%2$s</string>', '<string name="slider_setting_value">%1$.0f%2$s</string>')
-          x=x.replace('<string name="slider_setting_float_value">%.2f%2$s</string>', '<string name="slider_setting_float_value">%1$.2f%2$s</string>')
+          strings = root / 'src/main/res/values/strings.xml'
+          x = strings.read_text()
+          x = x.replace('<string name="slider_setting_value">%.0f%2$s</string>', '<string name="slider_setting_value">%1$.0f%2$s</string>')
+          x = x.replace('<string name="slider_setting_float_value">%.2f%2$s</string>', '<string name="slider_setting_float_value">%1$.2f%2$s</string>')
           strings.write_text(x)
+
+          # Dolphin's upstream Application is adapted into an explicit bootstrap helper.
+          # Emu Hub remains the only Android Application object and launcher package.
+          app = root / 'src/main/java/org/dolphinemu/dolphinemu/DolphinApplication.kt'
+          app.write_text(r'''// SPDX-License-Identifier: GPL-2.0-or-later
+          package org.dolphinemu.dolphinemu
+
+          import android.app.Activity
+          import android.app.Application
+          import android.content.Context
+          import android.hardware.usb.UsbManager
+          import android.util.Log
+          import org.dolphinemu.dolphinemu.utils.ActivityTracker
+          import org.dolphinemu.dolphinemu.utils.DirectoryInitialization
+          import org.dolphinemu.dolphinemu.utils.GCAdapter
+          import org.dolphinemu.dolphinemu.utils.WiimoteAdapter
+
+          class DolphinApplication : Application() {
+              override fun onCreate() {
+                  super.onCreate()
+                  initialize(this)
+              }
+
+              companion object {
+                  @Volatile private var initialized = false
+                  private lateinit var hostApplication: Application
+                  private lateinit var activityTracker: ActivityTracker
+
+                  @JvmStatic
+                  @Synchronized
+                  fun initialize(application: Application) {
+                      if (initialized) return
+                      Log.i("DOLPHIN_JNI", "Dolphin 2606a embedded bootstrap start")
+                      hostApplication = application
+                      activityTracker = ActivityTracker()
+                      application.registerActivityLifecycleCallbacks(activityTracker)
+                      System.loadLibrary("main")
+                      val usbManager = application.getSystemService(USB_SERVICE) as UsbManager
+                      GCAdapter.manager = usbManager
+                      WiimoteAdapter.manager = usbManager
+                      if (DirectoryInitialization.shouldStart(application.applicationContext))
+                          DirectoryInitialization.start(application.applicationContext)
+                      initialized = true
+                      Log.i("DOLPHIN_JNI", "Dolphin 2606a libmain loaded")
+                  }
+
+                  @JvmStatic
+                  fun getAppContext(): Context = hostApplication.applicationContext
+
+                  @JvmStatic
+                  fun getAppActivity(): Activity? = if (::activityTracker.isInitialized) activityTracker.currentActivity else null
+              }
+          }
+          '''.replace('          ', ''))
+
+          # Keep Dolphin's emulation/support Activities but remove its second app identity,
+          # launcher, TV launcher, sync services and document providers from the library manifest.
+          manifest = root / 'src/main/AndroidManifest.xml'
+          ANDROID = '{http://schemas.android.com/apk/res/android}'
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          ET.register_namespace('tools', 'http://schemas.android.com/tools')
+          tree = ET.parse(manifest)
+          mr = tree.getroot()
+          application = mr.find('application')
+          if application is None:
+              raise SystemExit('Dolphin manifest application missing')
+          application.attrib.clear()
+          keep_activities = {
+              '.activities.EmulationActivity',
+              '.features.settings.ui.SettingsActivity',
+              '.features.cheats.ui.CheatsActivity',
+              '.activities.CustomFilePickerActivity',
+              '.activities.ConvertActivity',
+              '.activities.UserDataActivity',
+              '.features.riivolution.ui.RiivolutionBootActivity',
+          }
+          for child in list(application):
+              if child.tag == 'activity' and child.attrib.get(ANDROID + 'name') in keep_activities:
+                  child.attrib[ANDROID + 'exported'] = 'false'
+                  # Custom picker must not advertise itself globally inside Emu Hub.
+                  for filt in list(child.findall('intent-filter')):
+                      child.remove(filt)
+                  continue
+              application.remove(child)
+          tree.write(manifest, encoding='utf-8', xml_declaration=True)
+
+          # Add high-signal runtime breadcrumbs without altering Dolphin's core behavior.
+          fragment = root / 'src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt'
+          f = fragment.read_text()
+          f = f.replace('NativeLibrary.SurfaceChanged(holder.surface)', 'android.util.Log.i("DOLPHIN_VIDEO", "Surface attached ${width}x${height}")\n        NativeLibrary.SurfaceChanged(holder.surface)')
+          f = f.replace('NativeLibrary.SurfaceDestroyed()', 'android.util.Log.i("DOLPHIN_VIDEO", "Surface destroyed")\n        NativeLibrary.SurfaceDestroyed()')
+          f = f.replace('NativeLibrary.Run(paths, riivolution)\n', 'android.util.Log.i("DOLPHIN_BOOT", "Native emulation thread entering Run")\n                    NativeLibrary.Run(paths, riivolution)\n                    android.util.Log.i("DOLPHIN_BOOT", "Native emulation thread returned from Run")\n', 1)
+          f = f.replace('NativeLibrary.StopEmulation()', 'android.util.Log.i("DOLPHIN_BOOT", "StopEmulation requested")\n        NativeLibrary.StopEmulation()')
+          fragment.write_text(f)
           PY
-          grep -nE 'android.library|applicationId|targetSdk|VERSION_NAME|APPLICATION_ID|app_name_suffixed|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts || true
-          grep -nE 'slider_setting_(float_)?value' .native-dolphin-src/Source/Android/app/src/main/res/values/strings.xml || true
+
+          grep -nE 'android.library|VERSION_NAME|APPLICATION_ID|app_name_suffixed|abiFilters' .native-dolphin-src/Source/Android/app/build.gradle.kts
+          grep -n 'fun initialize(application' .native-dolphin-src/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/DolphinApplication.kt
+          grep -n 'DOLPHIN_VIDEO\|DOLPHIN_BOOT' .native-dolphin-src/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt
+          ! grep -q 'android.intent.category.LAUNCHER' .native-dolphin-src/Source/Android/app/src/main/AndroidManifest.xml
+          ! grep -q 'DolphinApplication' .native-dolphin-src/Source/Android/app/src/main/AndroidManifest.xml
 
       - name: Build Dolphin ARM64 AAR
         shell: bash
@@ -106,20 +211,64 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      - name: Inspect and stage engine
+      - name: Inspect and stage embedded engine
         shell: bash
         run: |
           set -euxo pipefail
           AAR=$(find .native-dolphin-src/Source/Android/app/build/outputs/aar -name '*release*.aar' | head -1)
           test -n "$AAR"
-          mkdir -p native-dolphin/out
+          mkdir -p native-dolphin/out app/libs
           cp "$AAR" native-dolphin/out/dolphin-2606a-engine-arm64.aar
-          unzip -l "$AAR" | grep -E 'classes.jar|jni/arm64-v8a/.*\.so|AndroidManifest.xml' | head -120
-          sha256sum native-dolphin/out/dolphin-2606a-engine-arm64.aar > native-dolphin/out/dolphin-2606a-engine-arm64.aar.sha256
+          cp "$AAR" app/libs/dolphin-2606a-engine-arm64.aar
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libmain.so'
+          unzip -l "$AAR" | grep 'assets/Sys/GC/dsp_rom.bin'
+          unzip -l "$AAR" | grep 'assets/Sys/GC/font_western.bin'
+          unzip -l "$AAR" | grep 'classes.jar'
+          unzip -p "$AAR" AndroidManifest.xml > /tmp/dolphin-aar-manifest.xml
+          ! grep -q 'android.intent.category.LAUNCHER' /tmp/dolphin-aar-manifest.xml
+          ! grep -q 'DolphinApplication' /tmp/dolphin-aar-manifest.xml
+          grep -q 'org.dolphinemu.dolphinemu.activities.EmulationActivity' /tmp/dolphin-aar-manifest.xml
+          sha256sum "$AAR" | tee native-dolphin/out/dolphin-2606a-engine-arm64.aar.sha256
 
       - name: Upload embeddable engine artifact
         uses: actions/upload-artifact@v4
         with:
           name: dolphin-2606a-engine-arm64
           path: native-dolphin/out/*
+          retention-days: 7
+
+      - name: Setup Gradle for Emu Hub
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Emu Hub with embedded Dolphin
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify final Emu Hub APK contains Dolphin
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)
+          test -n "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libmain.so'
+          unzip -l "$APK" | grep 'assets/Sys/GC/dsp_rom.bin'
+          unzip -l "$APK" | grep 'assets/Sys/GC/font_western.bin'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libemuhost.so'
+          aapt dump xmltree "$APK" AndroidManifest.xml > /tmp/emuhub-final-manifest.txt
+          grep -q 'com.ric.emuhub.EmuHubApp' /tmp/emuhub-final-manifest.txt
+          grep -q 'org.dolphinemu.dolphinemu.activities.EmulationActivity' /tmp/emuhub-final-manifest.txt
+          ! grep -q 'org.dolphinemu.dolphinemu.DolphinApplication' /tmp/emuhub-final-manifest.txt
+          echo "Final APK: $APK"
+          du -h "$APK"
+
+      - name: Upload Emu Hub embedded Dolphin APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmuHub-Dolphin2606a-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           retention-days: 7
