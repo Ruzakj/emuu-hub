@@ -57,6 +57,8 @@ jobs:
           set -euxo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p=Path('.native-dolphin-src/Source/Android/app/build.gradle.kts')
           s=p.read_text()
           s=s.replace('alias(libs.plugins.android.application)', 'alias(libs.plugins.android.library)')
@@ -65,6 +67,13 @@ jobs:
           s=s.replace('        applicationId = "org.dolphinemu.dolphinemu"\n', '')
           s=s.replace('        targetSdk = 36\n', '')
           s=s.replace('        versionCode = getBuildVersionCode()\n\n        versionName = getGitVersion()\n\n', '')
+
+          marker='        buildConfigField("String", "BRANCH", "\\\"${getBranch()}\\\"")\n'
+          if marker not in s:
+              raise SystemExit('Unable to locate Dolphin BuildConfig marker')
+          s=s.replace(marker, marker +
+              '        buildConfigField("String", "VERSION_NAME", "\\\"2606a\\\"")\n' +
+              '        buildConfigField("String", "APPLICATION_ID", "\\\"org.dolphinemu.dolphinemu\\\"")\n')
 
           start=s.find('    signingConfigs {')
           end=s.find('    // Define build types', start)
@@ -75,12 +84,19 @@ jobs:
           end=s.find('    externalNativeBuild {', start)
           if start == -1 or end == -1:
               raise SystemExit('Unable to locate Dolphin buildTypes block')
-          replacement='''    buildTypes {\n        release {\n            isMinifyEnabled = false\n        }\n        debug {\n            isJniDebuggable = true\n        }\n    }\n'''
+          replacement='''    buildTypes {\n        release {\n            resValue("string", "app_name_suffixed", "Dolphin Emulator")\n            isMinifyEnabled = false\n        }\n        debug {\n            resValue("string", "app_name_suffixed", "Dolphin Debug")\n            isJniDebuggable = true\n        }\n    }\n'''
           s=s[:start]+replacement+s[end:]
           s=s.replace('abiFilters("arm64-v8a", "x86_64")', 'abiFilters("arm64-v8a")')
           p.write_text(s)
+
+          strings=Path('.native-dolphin-src/Source/Android/app/src/main/res/values/strings.xml')
+          x=strings.read_text()
+          x=x.replace('<string name="slider_setting_value">%.0f%2$s</string>', '<string name="slider_setting_value">%1$.0f%2$s</string>')
+          x=x.replace('<string name="slider_setting_float_value">%.2f%2$s</string>', '<string name="slider_setting_float_value">%1$.2f%2$s</string>')
+          strings.write_text(x)
           PY
-          grep -nE 'android.library|applicationId|targetSdk|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts || true
+          grep -nE 'android.library|applicationId|targetSdk|VERSION_NAME|APPLICATION_ID|app_name_suffixed|buildTypes|abiFilters|namespace' .native-dolphin-src/Source/Android/app/build.gradle.kts || true
+          grep -nE 'slider_setting_(float_)?value' .native-dolphin-src/Source/Android/app/src/main/res/values/strings.xml || true
 
       - name: Build Dolphin ARM64 AAR
         shell: bash
