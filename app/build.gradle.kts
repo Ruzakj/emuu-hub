@@ -26,6 +26,14 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/arm64-v8a/liboboe.so",
+                "lib/arm64-v8a/libfile_redirect_hook.so",
+                "lib/arm64-v8a/libgsl_alloc_hook.so",
+                "lib/arm64-v8a/libhook_impl.so",
+                "lib/arm64-v8a/libmain_hook.so"
+            )
         }
     }
 
