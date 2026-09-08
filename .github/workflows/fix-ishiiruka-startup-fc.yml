@@ -1,0 +1,40 @@
+name: Fix Ishiiruka Startup FC
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fix-ishiiruka-startup-fc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Defer Ishiiruka native load until module launch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/EmuHubApp.kt')
+          s=p.read_text()
+          needle='            probeIshiirukaNativeLoad()\n'
+          if needle not in s:
+              raise SystemExit('startup preload call not found')
+          s=s.replace(needle,'',1)
+          p.write_text(s)
+          PY
+          git diff --check
+          ! sed -n '/override fun onCreate()/,/installRuntimeCrashHandler()/p' app/src/main/java/com/ric/emuhub/EmuHubApp.kt | grep -q 'probeIshiirukaNativeLoad()'
+      - name: Commit runtime fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/EmuHubApp.kt
+          git commit -m "fix: defer embedded Ishiiruka native load"
+          git push
