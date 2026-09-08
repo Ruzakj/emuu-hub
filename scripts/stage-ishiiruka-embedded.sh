@@ -37,7 +37,7 @@ test -s "$MOD/src/main/jniLibs/arm64-v8a/libmain.so"
 
 cat > "$MOD/build.gradle.kts" <<'EOF'
 plugins {
-    id("com.android.library") version "8.7.3"
+    id("com.android.library")
 }
 
 android {
