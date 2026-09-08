@@ -38,6 +38,7 @@ class EmuHubApp : Application() {
             EnginePackManager.bootstrapAsync(this)
             Thread({ runCatching { StoragePaths.ensureLayout(applicationContext) } }, "emuhub-storage-init").start()
             StorageMaintenance.runAsync(this)
+            probeIshiirukaNativeLoad()
         } else if (!isPs2Process) {
             Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
         }
@@ -80,6 +81,47 @@ class EmuHubApp : Application() {
             val file = ishiirukaLogFile()
             if (file.exists() && file.length() > 512 * 1024) file.writeText("")
             file.appendText(text.trimEnd() + "\n\n")
+        }
+    }
+
+    private fun probeIshiirukaNativeLoad() {
+        val prefs = getSharedPreferences("ishiiruka_runtime_trace", MODE_PRIVATE)
+        try {
+            System.loadLibrary("main")
+            prefs.edit()
+                .putBoolean("native_preload_ok", true)
+                .remove("native_preload_error")
+                .commit()
+        } catch (error: UnsatisfiedLinkError) {
+            val message = error.toString()
+            prefs.edit()
+                .putBoolean("native_preload_ok", false)
+                .putString("native_preload_error", message)
+                .putLong("native_preload_time", System.currentTimeMillis())
+                .commit()
+            appendIshiirukaLog(buildString {
+                appendLine("EMU HUB ISHIIRUKA NATIVE LOAD FAILURE")
+                appendLine("time=${System.currentTimeMillis()}")
+                appendLine("process=${currentProcessName()}")
+                appendLine("abis=${Build.SUPPORTED_ABIS.joinToString()}")
+                appendLine("exception=$message")
+                appendLine("stack=${android.util.Log.getStackTraceString(error)}")
+            })
+        } catch (error: Throwable) {
+            val message = "${error.javaClass.name}: ${error.message}"
+            prefs.edit()
+                .putBoolean("native_preload_ok", false)
+                .putString("native_preload_error", message)
+                .putLong("native_preload_time", System.currentTimeMillis())
+                .commit()
+            appendIshiirukaLog(buildString {
+                appendLine("EMU HUB ISHIIRUKA NATIVE PRELOAD ERROR")
+                appendLine("time=${System.currentTimeMillis()}")
+                appendLine("process=${currentProcessName()}")
+                appendLine("abis=${Build.SUPPORTED_ABIS.joinToString()}")
+                appendLine("exception=$message")
+                appendLine("stack=${android.util.Log.getStackTraceString(error)}")
+            })
         }
     }
 
