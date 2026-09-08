@@ -26,6 +26,9 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "platforms;android-36" "ndk;27.0.12077973" "cmake;3.22.1"
 
+      - name: Stage embedded Ishiiruka 3.6.4-r1
+        run: bash scripts/stage-ishiiruka-embedded.sh
+
       - name: Restore cached mGBA core
         id: mgba-cache
         uses: actions/cache@v4
@@ -145,45 +148,15 @@ jobs:
           rm -rf "$ROOT"
           mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
 
-          # NES: Galaxy Patrol (MIT, Riley Lannon)
-          curl --retry 3 --retry-delay 2 -fL \
-            "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" \
-            -o "$ROOT/NES/Galaxy Patrol.nes"
-
-          # GBA: @rkanoid modern builds (MIT, Ben Orozco)
-          curl --retry 3 --retry-delay 2 -fL \
-            "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" \
-            -o "$ROOT/GBA/Rkanoid Modern.gba"
-          curl --retry 3 --retry-delay 2 -fL \
-            "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" \
-            -o "$ROOT/GBA/Rkanoid Demo.gba"
-
-          # SNES: original homebrew from donth77/snes-homebrew (MIT)
-          curl --retry 3 --retry-delay 2 -fL \
-            "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" \
-            -o "$ROOT/SNES/Gothicvania.sfc"
-          curl --retry 3 --retry-delay 2 -fL \
-            "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" \
-            -o "$ROOT/SNES/Hello World Region.sfc"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" -o "$ROOT/NES/Galaxy Patrol.nes"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" -o "$ROOT/GBA/Rkanoid Modern.gba"
+          curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" -o "$ROOT/GBA/Rkanoid Demo.gba"
+          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"
+          curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"
 
           cat > "$ROOT/NOTICE.txt" <<'EOF'
           Emu Hub Built-in Homebrew Starter Pack
-
           Only freely redistributable homebrew is bundled here. No commercial ROMs are included.
-
-          NES/Galaxy Patrol.nes
-          Source: https://github.com/rlannon/NES_GalaxyPatrol
-          License: MIT, Copyright (c) 2018 Riley Lannon
-
-          GBA/Rkanoid Modern.gba
-          GBA/Rkanoid Demo.gba
-          Source: https://github.com/benoror/gbadev
-          License: MIT for the modernized @rkanoid project/builds, Copyright (c) 2001-2026 Ben Orozco
-
-          SNES/Gothicvania.sfc
-          SNES/Hello World Region.sfc
-          Source: https://github.com/donth77/snes-homebrew
-          License: MIT, Copyright (c) 2026 Tom D
           EOF
 
           test -s "$ROOT/NES/Galaxy Patrol.nes"
@@ -191,7 +164,6 @@ jobs:
           test -s "$ROOT/GBA/Rkanoid Demo.gba"
           test -s "$ROOT/SNES/Gothicvania.sfc"
           test -s "$ROOT/SNES/Hello World Region.sfc"
-          du -ah "$ROOT" | sort -h
 
       - name: Verify emulator cores
         run: |
@@ -201,6 +173,7 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
+          test -s embedded/ishiiruka/src/main/jniLibs/arm64-v8a/libmain.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -217,6 +190,7 @@ jobs:
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemuhost.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libppsspp_core.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libmain.so'
           unzip -l "$APK" | grep 'assets/builtin-roms/NES/Galaxy Patrol.nes'
           unzip -l "$APK" | grep 'assets/builtin-roms/GBA/Rkanoid Modern.gba'
           unzip -l "$APK" | grep 'assets/builtin-roms/SNES/Gothicvania.sfc'
@@ -226,6 +200,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EmuHub-InternalCores-debug
+          name: EmuHub-Ishiiruka-Embedded-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
