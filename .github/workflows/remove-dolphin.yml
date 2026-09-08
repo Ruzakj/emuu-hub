@@ -1,0 +1,216 @@
+name: Remove Dolphin completely
+
+on:
+  push:
+    paths:
+      - '.github/workflows/remove-dolphin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove Dolphin code, UI, assets and workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # Remove dedicated Dolphin/GC-Wii implementation files.
+          explicit = [
+              '.github/workflows/add-dolphin-gc-wii.yml',
+              '.github/workflows/build-emuhub-dolphin-official.yml',
+              '.github/workflows/build-libretro-dolphin.yml',
+              '.github/workflows/fix-dolphin-first-frame.yml',
+              '.github/workflows/patch-dolphin-async-prepare.yml',
+              '.github/workflows/patch-dolphin-internal-routing.yml',
+              '.github/workflows/patch-dolphin-libretro-assets.yml',
+              '.github/workflows/patch-dolphin-retroinit-hw-crash.yml',
+              '.github/workflows/patch-dolphin-settings-ui.yml',
+              '.github/workflows/patch-dolphin-zip-runtime.yml',
+              '.github/workflows/switch-gc-wii-to-libretro.yml',
+              'scripts/stage-dolphin-runtime.sh',
+              'app/src/main/java/com/ric/emuhub/DolphinSettingsActivity.kt',
+              'app/src/main/assets/dolphin_first_frame_hotfix_v1.txt',
+              'app/src/main/assets/dolphin_zip_runtime_trigger_v1.txt',
+              'app/src/main/assets/gamecube_wii_dolphin_v1.txt',
+              'app/src/main/assets/inapp_trigger_dolphin_first_frame_hw_v3.txt',
+              'app/src/main/assets/inapp_update_trigger_2026_09_05_async_dolphin_v2.txt',
+              'app/src/main/assets/trigger_dolphin_retroinit_hw_fix_20260905.txt',
+          ]
+          for rel in explicit:
+              p = root / rel
+              if p.exists():
+                  p.unlink()
+
+          # Remove any other tracked file whose filename itself is Dolphin-specific,
+          # excluding this one-shot cleanup workflow until the final commit step.
+          cleanup = Path('.github/workflows/remove-dolphin.yml')
+          for p in list(root.rglob('*')):
+              if not p.is_file() or p == cleanup or '.git' in p.parts:
+                  continue
+              if 'dolphin' in p.name.lower():
+                  p.unlink()
+
+          manifest = Path('app/src/main/AndroidManifest.xml')
+          s = manifest.read_text()
+          s = re.sub(r'\n\s*<activity android:name="\.DolphinSettingsActivity"[^>]*/>', '', s)
+          manifest.write_text(s)
+
+          main = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s = main.read_text()
+          replacements = {
+              '"gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm","gcm","rvz","wbfs","wia","wad","dol"': '"gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm"',
+              '        nav.addView(consoleNav("◈","GC/WII","Dolphin") { startActivity(Intent(this@MainActivity,DolphinSettingsActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))\n': '',
+              'arrayOf("PS2","ARMSX2","2"),arrayOf("GAMECUBE","Dolphin Core","C"),arrayOf("WII","Dolphin Core","W"),arrayOf("GBA","mGBA","G")': 'arrayOf("PS2","ARMSX2","2"),arrayOf("GBA","mGBA","G")',
+              '            "gamecube" in t || "gc" in t || "ngc" in t || h.contains("game cube")->"GAMECUBE"\n': '',
+              '            "wii" in t || h.contains("nintendo wii")->"WII"\n': '',
+              '            "gcm","rvz"->folderConsoleHint(g) ?: "GAMECUBE"\n': '',
+              '            "wbfs","wia","wad"->"WII"\n': '',
+              '            "dol"->folderConsoleHint(g) ?: "GAMECUBE"\n': '',
+              '"PSP"->0;"PS1"->1;"PS2"->2;"GAMECUBE"->3;"WII"->4;"GBA"->5;"NES"->6;"SNES"->7;"SWITCH"->8;"DISC"->9;"ARCHIVE"->10': '"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8',
+              '        "GAMECUBE"->"NINTENDO GAMECUBE • DOLPHIN"\n': '',
+              '        "WII"->"NINTENDO WII • DOLPHIN"\n': '',
+              'val filters=listOf("ALL","PSP","PS1","PS2","GAMECUBE","WII","GBA","NES","SNES","SWITCH","JAVA")': 'val filters=listOf("ALL","PSP","PS1","PS2","GBA","NES","SNES","SWITCH","JAVA")',
+              ';"GAMECUBE"->"C";"WII"->"W"': '',
+              '            "GAMECUBE","WII"->copyAndLaunchInternal(uri,g.name,g.ext,"dolphin")\n': '',
+              'ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->copyAndLaunchInternal(uri,name,ext,"dolphin");': '',
+              ',"GameCube / Wii • Dolphin Core"': '',
+              ';else->copyAndLaunchInternal(uri,name,"iso","dolphin")': '',
+              ';"gcm","rvz"->"Nintendo GameCube • Dolphin";"wbfs","wia","wad","dol"->"Nintendo Wii / GameCube • Dolphin"': '',
+              '"PS1 / PSP / PS2 / GC / Wii • choose engine"': '"PS1 / PSP / PS2 • choose engine"',
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+
+          # Rebuild ISO chooser explicitly to avoid stale fourth-option routing.
+          s = re.sub(
+              r'private fun showIsoChooser\(uri:Uri,name:String\)\{.*?\.setNegativeButton\("Batal",null\)\.show\(\)\}',
+              'private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}',
+              s,
+              flags=re.S,
+          )
+          main.write_text(s)
+
+          game = Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
+          s = game.read_text()
+          s = s.replace('; "dolphin" -> "libdolphin_core.so"', '')
+          s = s.replace('; "dolphin" -> "Dolphin Core"', '')
+          s = s.replace('            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)\n', '')
+          s = s.replace('||coreId=="dolphin"', '')
+          s = s.replace('"pcsx","ppsspp","dolphin"', '"pcsx","ppsspp"')
+
+          # Remove a balanced-brace block starting at a known marker.
+          def remove_block(text, marker):
+              start = text.find(marker)
+              if start < 0:
+                  return text
+              brace = text.find('{', start)
+              if brace < 0:
+                  return text
+              depth = 0
+              i = brace
+              in_string = False
+              escape = False
+              while i < len(text):
+                  ch = text[i]
+                  if in_string:
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == '"':
+                          in_string = False
+                  else:
+                      if ch == '"':
+                          in_string = True
+                      elif ch == '{':
+                          depth += 1
+                      elif ch == '}':
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              while end < len(text) and text[end] in ' \t':
+                                  end += 1
+                              if end < len(text) and text[end] == '\n':
+                                  end += 1
+                              return text[:start] + text[end:]
+                  i += 1
+              raise RuntimeError(f'unclosed block for {marker}')
+
+          s = remove_block(s, '        if (coreId == "dolphin") {')
+
+          # Remove any dedicated private Dolphin helper function still present.
+          while True:
+              m = re.search(r'^[ \t]*private fun [A-Za-z0-9_]*Dolphin[A-Za-z0-9_]*\([^\n]*', s, flags=re.M)
+              if not m:
+                  break
+              s = remove_block(s, m.group(0))
+
+          game.write_text(s)
+
+          # Remove Dolphin-only references from generic text assets if any survived.
+          for base in [Path('app/src/main/assets'), Path('scripts')]:
+              if not base.exists():
+                  continue
+              for p in base.rglob('*'):
+                  if p.is_file():
+                      try:
+                          text = p.read_text()
+                      except UnicodeDecodeError:
+                          continue
+                      if 'dolphin' in text.lower():
+                          p.unlink()
+
+          # Fail rather than committing a half-clean source tree.
+          leftovers = []
+          for base in [Path('app/src/main'), Path('scripts')]:
+              if not base.exists():
+                  continue
+              for p in base.rglob('*'):
+                  if not p.is_file():
+                      continue
+                  try:
+                      text = p.read_text()
+                  except UnicodeDecodeError:
+                      continue
+                  if 'dolphin' in text.lower():
+                      leftovers.append(str(p))
+          if leftovers:
+              raise SystemExit('Dolphin references remain in app source: ' + ', '.join(leftovers))
+          PY
+
+          # The cleanup workflow is one-shot; remove it too so no Dolphin-named file remains.
+          rm -f .github/workflows/remove-dolphin.yml
+
+          echo 'Remaining Dolphin-named paths:'
+          find . -not -path './.git/*' -iname '*dolphin*' -print
+          if find . -not -path './.git/*' -iname '*dolphin*' -print -quit | grep -q .; then
+            echo 'ERROR: Dolphin-named path still exists' >&2
+            exit 1
+          fi
+
+          git status --short
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: remove Dolphin and GC/Wii integration"
+          git push origin HEAD:main
