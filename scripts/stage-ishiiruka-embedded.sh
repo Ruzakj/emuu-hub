@@ -33,6 +33,11 @@ unzip -q "$APK" -d "$WORK/apk"
 if [ -d "$WORK/apk/assets" ]; then cp -a "$WORK/apk/assets/." "$MOD/src/main/assets/"; fi
 cp -a "$WORK/apk/lib/arm64-v8a/." "$MOD/src/main/jniLibs/arm64-v8a/"
 
+# Emu Hub already packages libc++_shared.so through its existing native runtime.
+# Shipping the copy from Ishiiruka as well makes AGP fail mergeDebugNativeLibs.
+# Keep exactly one process-wide C++ shared runtime in the final APK.
+rm -f "$MOD/src/main/jniLibs/arm64-v8a/libc++_shared.so"
+
 test -s "$MOD/src/main/jniLibs/arm64-v8a/libmain.so"
 
 cat > "$MOD/build.gradle.kts" <<'EOF'
