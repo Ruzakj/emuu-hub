@@ -101,7 +101,7 @@ dependencies {
     implementation("androidx.room:room-rxjava2:2.6.1")
     implementation("androidx.transition:transition:1.4.1")
     implementation("com.google.code.gson:gson:2.9.1")
-    implementation("com.google.oboe:oboe:1.7.0")
+    implementation("com.google.oboe:oboe:1.10.0")
     implementation("ch.acra:acra-http:5.11.3")
     implementation("com.github.yukuku:ambilwarna:2.0.1")
     implementation("com.github.penn5:donations:3.6.0")
