@@ -38,7 +38,6 @@ class EmuHubApp : Application() {
             EnginePackManager.bootstrapAsync(this)
             Thread({ runCatching { StoragePaths.ensureLayout(applicationContext) } }, "emuhub-storage-init").start()
             StorageMaintenance.runAsync(this)
-            probeIshiirukaNativeLoad()
         } else if (!isPs2Process) {
             Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
         }
