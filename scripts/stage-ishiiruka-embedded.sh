@@ -16,6 +16,11 @@ mkdir -p "$WORK" "$MOD/src/main/java" "$MOD/src/main/res" "$MOD/src/main/assets"
 echo "==> Fetching Ishiiruka Android ${ISH_TAG}"
 git clone --depth 1 --branch "$ISH_TAG" --recurse-submodules "$ISH_REPO" "$SRC"
 
+# setup-gradle validates every wrapper JAR below the workspace, including wrappers
+# from vendored upstream examples/submodules that are never executed by Emu Hub.
+# Remove those binary wrappers after cloning so validation only covers our build.
+find "$SRC" -type f -path '*/gradle/wrapper/gradle-wrapper.jar' -print -delete
+
 echo "==> Fetching verified ARM64 runtime"
 curl --retry 3 --retry-delay 2 -fL "$ISH_APK" -o "$APK"
 echo "${ISH_APK_SHA256}  ${APK}" | sha256sum -c -
