@@ -14,7 +14,10 @@ rm -rf "$WORK" "$MOD"
 mkdir -p "$WORK" "$MOD/src/main/java" "$MOD/src/main/res" "$MOD/src/main/assets" "$MOD/src/main/jniLibs/arm64-v8a"
 
 echo "==> Fetching Ishiiruka Android ${ISH_TAG}"
-git clone --depth 1 --branch "$ISH_TAG" --recurse-submodules "$ISH_REPO" "$SRC"
+# We only compile the Android Java/resources from upstream. Native/assets come from the
+# verified release APK below, so recursively cloning Dolphin's huge submodule graph is
+# unnecessary and makes every Emu Hub build take several extra minutes.
+git clone --depth 1 --branch "$ISH_TAG" "$ISH_REPO" "$SRC"
 find "$SRC" -type f -path '*/gradle/wrapper/gradle-wrapper.jar' -print -delete
 
 echo "==> Fetching verified ARM64 runtime"
@@ -106,6 +109,24 @@ if 'org.dolphinemu.dolphinemu.DolphinApplication' not in s:
     s = s.replace('class EmuHubApp : Application() {', 'class EmuHubApp : DolphinApplication() {')
     app.write_text(s)
 
+# The official 3.6.4-r1 APK's native core may not expose the optional raw-evdev JNI
+# methods declared by the matching Java tree. That probe runs during Activity.onCreate
+# and previously killed Emu Hub with UnsatisfiedLinkError. Raw evdev is optional on
+# stock Android, so treat missing JNI exactly like an unavailable provider and fall
+# back to Android MotionEvent/controller input.
+evdev = Path('embedded/ishiiruka/src/main/java/org/dolphinemu/dolphinemu/utils/NativeEvdevStickInputProvider.java')
+if evdev.exists():
+    es = evdev.read_text()
+    old_snapshot = '''    @Override\n    public RawStickState snapshot() {\n        return RawStickState.fromAxes(NativeLibrary.PollRawGamepadAxes());\n    }'''
+    new_snapshot = '''    @Override\n    public RawStickState snapshot() {\n        try {\n            return RawStickState.fromAxes(NativeLibrary.PollRawGamepadAxes());\n        } catch (UnsatisfiedLinkError error) {\n            android.util.Log.w("SlippiEmu", "Raw evdev JNI unavailable; using Android input fallback", error);\n            return null;\n        }\n    }'''
+    old_wait = '''    @Override\n    public RawStickState waitForSnapshot(int timeoutMs) {\n        return RawStickState.fromAxes(NativeLibrary.WaitRawGamepadAxes(timeoutMs));\n    }'''
+    new_wait = '''    @Override\n    public RawStickState waitForSnapshot(int timeoutMs) {\n        try {\n            return RawStickState.fromAxes(NativeLibrary.WaitRawGamepadAxes(timeoutMs));\n        } catch (UnsatisfiedLinkError error) {\n            android.util.Log.w("SlippiEmu", "Raw evdev wait JNI unavailable; using Android input fallback", error);\n            return null;\n        }\n    }'''
+    if old_snapshot in es:
+        es = es.replace(old_snapshot, new_snapshot)
+    if old_wait in es:
+        es = es.replace(old_wait, new_wait)
+    evdev.write_text(es)
+
 # Mark that the embedded activity was actually entered. If native code kills the process
 # after this point, EmuHubApp will recover this stage on the next startup.
 emu = Path('embedded/ishiiruka/src/main/java/org/dolphinemu/dolphinemu/activities/EmulationActivity.java')
@@ -134,7 +155,6 @@ repls = [
 for old,new in repls:
     if old in s: s = s.replace(old,new)
 
-# Add a visible LOG shortcut to the home navigation.
 nav_old = 'nav.addView(consoleNav("⇩","UPDATE","System") { startActivity(Intent(this@MainActivity,UpdateActivity::class.java)) },LinearLayout.LayoutParams(0,dp(64),1f))'
 nav_new = nav_old + '\n        nav.addView(consoleNav("≡","LOG","Crash") { showIshiirukaLog() },LinearLayout.LayoutParams(0,dp(64),1f))'
 if 'showIshiirukaLog()' not in s and nav_old in s:
@@ -160,4 +180,5 @@ grep -q 'implementation(project(":ishiiruka"))' app/build.gradle.kts
 grep -q 'DolphinApplication' app/src/main/java/com/ric/emuhub/EmuHubApp.kt
 grep -q 'launchIshiirukaDirect' app/src/main/java/com/ric/emuhub/MainActivity.kt
 grep -q 'showIshiirukaLog' app/src/main/java/com/ric/emuhub/MainActivity.kt
+grep -q 'Raw evdev JNI unavailable' "$MOD/src/main/java/org/dolphinemu/dolphinemu/utils/NativeEvdevStickInputProvider.java"
 find "$MOD/src/main/jniLibs/arm64-v8a" -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
