@@ -47,32 +47,14 @@ class GameActivity : Activity() {
         val romName = intent.getStringExtra("romName") ?: File(rom).name
         gameProfile = resolveGameProfile(coreId, romName)
         val coreFile = when (coreId) {
-            "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; "dolphin" -> "libdolphin_core.so"; else -> "libmgba_core.so"
+            "fceumm" -> "libfceumm_core.so"; "snes9x" -> "libsnes9x_core.so"; "pcsx" -> "libpcsx_rearmed_core.so"; "ppsspp" -> "libppsspp_core.so"; else -> "libmgba_core.so"
         }
-        val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; "dolphin" -> "Dolphin Core"; else -> "mGBA" }
+        val coreLabel = when (coreId) { "fceumm" -> "FCEUmm"; "snes9x" -> "Snes9x"; "pcsx" -> "PCSX-ReARMed"; "ppsspp" -> "PPSSPP"; else -> "mGBA" }
         val systemRoot = StoragePaths.systemDir(this)
         coreTraceFile = File(StoragePaths.root(this), "CORE/core-runtime.log").apply { parentFile?.mkdirs() }
         NativeBridge.setLogPath(coreTraceFile.absolutePath)
         traceCoreStage("prepare", coreId, romName)
         if (coreId == "ppsspp") installPpssppAssets(systemRoot)
-        if (coreId == "dolphin") {
-            showPreparingScreen("Menyiapkan Dolphin…\nEkstraksi runtime pertama kali mungkin membutuhkan beberapa detik.")
-            traceCoreStage("prepare_dolphin_assets", coreId, romName)
-            Thread({
-                val ok = installDolphinAssets(systemRoot)
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    if (!ok) {
-                        traceCoreStage("prepare_dolphin_assets_failed", coreId, romName, false)
-                        showLoadError("Dolphin Sys gagal disiapkan. Log: emu-hub/CORE/core-runtime.log")
-                    } else {
-                        traceCoreStage("prepare_dolphin_assets_ok", coreId, romName)
-                        continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)
-                    }
-                }
-            }, "EmuHub-Dolphin-Prepare").apply { priority = Thread.NORM_PRIORITY - 1 }.start()
-            return
-        }
         continueCoreLaunch(rom, coreId, romName, coreFile, coreLabel, systemRoot)
     }
 
@@ -125,7 +107,6 @@ class GameActivity : Activity() {
             coreId=="pcsx" && ("final fantasy ix" in n || "final fantasy 9" in n || "ff9" in n) -> GameProfile("ps1-rpg","Z9x PS1 RPG",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="ppsspp" -> GameProfile("psp-balanced","Z9x PSP Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             coreId=="pcsx" -> GameProfile("ps1-balanced","Z9x PS1 Balanced",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
-            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)
             else -> GameProfile("classic","Classic",3,Process.THREAD_PRIORITY_DISPLAY,true)
         }
     }
@@ -153,10 +134,10 @@ class GameActivity : Activity() {
         overlay.addView(gameButton("L",10,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.START).apply{leftMargin=dp(28);topMargin=dp(58)})
         overlay.addView(gameButton("R",11,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.END).apply{rightMargin=dp(28);topMargin=dp(58)})
         if(coreId=="pcsx"){overlay.addView(gameButton("L2",12,52),FrameLayout.LayoutParams(dp(52),dp(38),Gravity.TOP or Gravity.START).apply{leftMargin=dp(106);topMargin=dp(60)});overlay.addView(gameButton("R2",13,52),FrameLayout.LayoutParams(dp(52),dp(38),Gravity.TOP or Gravity.END).apply{rightMargin=dp(106);topMargin=dp(60)})}
-        if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")overlay.addView(AnalogStickView(),FrameLayout.LayoutParams(dp(150),dp(150),Gravity.BOTTOM or Gravity.START).apply{leftMargin=dp(30);bottomMargin=dp(20)})
-        overlay.addView(DPadView(),FrameLayout.LayoutParams(dp(138),dp(138),Gravity.BOTTOM or Gravity.START).apply{leftMargin=if(coreId=="pcsx"||coreId=="ppsspp"||coreId=="dolphin")dp(188) else dp(42);bottomMargin=dp(26)})
+        if(coreId=="pcsx"||coreId=="ppsspp")overlay.addView(AnalogStickView(),FrameLayout.LayoutParams(dp(150),dp(150),Gravity.BOTTOM or Gravity.START).apply{leftMargin=dp(30);bottomMargin=dp(20)})
+        overlay.addView(DPadView(),FrameLayout.LayoutParams(dp(138),dp(138),Gravity.BOTTOM or Gravity.START).apply{leftMargin=if(coreId=="pcsx"||coreId=="ppsspp")dp(188) else dp(42);bottomMargin=dp(26)})
         val face=FrameLayout(this);fun addFace(label:String,id:Int,x:Int,y:Int){face.addView(gameButton(label,id,58),FrameLayout.LayoutParams(dp(58),dp(58),Gravity.TOP or Gravity.START).apply{leftMargin=dp(x);topMargin=dp(y)})}
-        when(coreId){"pcsx","ppsspp","dolphin"->{addFace("△",9,60,0);addFace("○",8,120,60);addFace("×",0,60,120);addFace("□",1,0,60)};"snes9x"->{addFace("X",9,60,0);addFace("A",8,120,60);addFace("B",0,60,120);addFace("Y",1,0,60)};else->{addFace("A",8,105,45);addFace("B",0,35,90)}}
+        when(coreId){"pcsx","ppsspp"->{addFace("△",9,60,0);addFace("○",8,120,60);addFace("×",0,60,120);addFace("□",1,0,60)};"snes9x"->{addFace("X",9,60,0);addFace("A",8,120,60);addFace("B",0,60,120);addFace("Y",1,0,60)};else->{addFace("A",8,105,45);addFace("B",0,35,90)}}
         overlay.addView(face,FrameLayout.LayoutParams(dp(178),dp(178),Gravity.BOTTOM or Gravity.END).apply{rightMargin=dp(28);bottomMargin=dp(18)})
         val center=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};center.addView(gameButton("SELECT",2,64),LinearLayout.LayoutParams(dp(72),dp(38)).apply{marginEnd=dp(10)});center.addView(gameButton("START",3,64),LinearLayout.LayoutParams(dp(72),dp(38)));overlay.addView(center,FrameLayout.LayoutParams(-2,dp(44),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply{bottomMargin=dp(20)});return overlay
     }
@@ -164,46 +145,6 @@ class GameActivity : Activity() {
     inner class AnalogStickView:View(this@GameActivity){private val basePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x552A2A30};private val ringPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x66FFFFFF;style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()};private val knobPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xAA5A5A62.toInt()};private var knobX=0f;private var knobY=0f;override fun onDraw(canvas:Canvas){val cx=width/2f;val cy=height/2f;val outer=min(width,height)*.44f;val knob=outer*.42f;canvas.drawCircle(cx,cy,outer,basePaint);canvas.drawCircle(cx,cy,outer,ringPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,ringPaint)};override fun onTouchEvent(e:MotionEvent):Boolean{val cx=width/2f;val cy=height/2f;val max=min(width,height)*.34f;when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{var dx=e.x-cx;var dy=e.y-cy;val d=sqrt(dx*dx+dy*dy);if(d>max&&d>0f){dx=dx/d*max;dy=dy/d*max};knobX=dx;knobY=dy;NativeBridge.setAnalog(((dx/max)*32767).toInt(),((dy/max)*32767).toInt());invalidate()};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{knobX=0f;knobY=0f;NativeBridge.setAnalog(0,0);invalidate()}};return true}}
     inner class DPadView:View(this@GameActivity){private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x8838383F.toInt()};private val textPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xDDFFFFFF.toInt();textSize=dp(24).toFloat();textAlign=Paint.Align.CENTER};private var activeId=-1;override fun onDraw(c:Canvas){val w=width/3f;val h=height/3f;c.drawRoundRect(w,0f,2*w,height.toFloat(),dp(8).toFloat(),dp(8).toFloat(),paint);c.drawRoundRect(0f,h,width.toFloat(),2*h,dp(8).toFloat(),dp(8).toFloat(),paint);c.drawText("↑",width/2f,h*.72f,textPaint);c.drawText("↓",width/2f,h*2.78f,textPaint);c.drawText("←",w*.5f,height/2f+textPaint.textSize/3,textPaint);c.drawText("→",w*2.5f,height/2f+textPaint.textSize/3,textPaint)};private fun idAt(x:Float,y:Float):Int{val dx=x-width/2f;val dy=y-height/2f;return if(kotlin.math.abs(dx)>kotlin.math.abs(dy)){if(dx<0)6 else 7}else{if(dy<0)4 else 5}};override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{val id=idAt(e.x,e.y);if(id!=activeId){if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=id;NativeBridge.setButton(id,true)}};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=-1}};return true}}
 
-    private fun installDolphinAssets(root:File):Boolean{
-        val target=File(root,"dolphin-emu/Sys")
-        val marker=File(target,".emuhub_dolphin_sys_zip_v3")
-        val required={ File(target,"GC/font_western.bin").isFile && File(target,"GC/dsp_rom.bin").isFile && File(target,"GC/dsp_coef.bin").isFile }
-        if(marker.exists() && required()) return true
-        return runCatching {
-            traceCoreStage("dolphin_zip_open", "dolphin", intent.getStringExtra("romName") ?: "unknown")
-            target.mkdirs()
-            assets.open("Dolphin/Sys.zip").use { raw ->
-                ZipInputStream(raw.buffered(1024*1024)).use { zip ->
-                    val canonicalRoot=target.canonicalFile
-                    var entry=zip.nextEntry
-                    var count=0
-                    val buffer=ByteArray(1024*1024)
-                    while(entry!=null){
-                        val outFile=File(target,entry.name).canonicalFile
-                        if(!outFile.path.startsWith(canonicalRoot.path + File.separator)) throw SecurityException("Invalid Dolphin zip entry: ${entry.name}")
-                        if(entry.isDirectory){
-                            outFile.mkdirs()
-                        }else{
-                            outFile.parentFile?.mkdirs()
-                            outFile.outputStream().buffered(1024*1024).use { out ->
-                                var n=zip.read(buffer)
-                                while(n>0){ out.write(buffer,0,n); n=zip.read(buffer) }
-                            }
-                        }
-                        zip.closeEntry()
-                        count++
-                        if(count%250==0) runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_entries=$count\n") }
-                        entry=zip.nextEntry
-                    }
-                    runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_complete entries=$count\n") }
-                }
-            }
-            if(required()){ marker.writeText("3"); true } else false
-        }.getOrElse {
-            runCatching { coreTraceFile.appendText("JAVA ${System.currentTimeMillis()} dolphin_zip_exception=${it.javaClass.simpleName}:${it.message}\n") }
-            false
-        }
-    }
 
     private fun installPpssppAssets(root:File){
         val target=File(root,"PPSSPP")
