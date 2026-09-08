@@ -28,7 +28,6 @@ jobs:
 
           root = Path('.')
 
-          # Remove dedicated Dolphin/GC-Wii implementation files.
           explicit = [
               '.github/workflows/add-dolphin-gc-wii.yml',
               '.github/workflows/build-emuhub-dolphin-official.yml',
@@ -52,17 +51,12 @@ jobs:
           ]
           for rel in explicit:
               p = root / rel
-              if p.exists():
-                  p.unlink()
+              if p.exists(): p.unlink()
 
-          # Remove any other tracked file whose filename itself is Dolphin-specific,
-          # excluding this one-shot cleanup workflow until the final commit step.
           cleanup = Path('.github/workflows/remove-dolphin.yml')
           for p in list(root.rglob('*')):
-              if not p.is_file() or p == cleanup or '.git' in p.parts:
-                  continue
-              if 'dolphin' in p.name.lower():
-                  p.unlink()
+              if not p.is_file() or p == cleanup or '.git' in p.parts: continue
+              if 'dolphin' in p.name.lower(): p.unlink()
 
           manifest = Path('app/src/main/AndroidManifest.xml')
           s = manifest.read_text()
@@ -87,22 +81,40 @@ jobs:
               ';"GAMECUBE"->"C";"WII"->"W"': '',
               '            "GAMECUBE","WII"->copyAndLaunchInternal(uri,g.name,g.ext,"dolphin")\n': '',
               'ext in setOf("gcm","rvz","wbfs","wia","wad","dol")->copyAndLaunchInternal(uri,name,ext,"dolphin");': '',
-              ',"GameCube / Wii • Dolphin Core"': '',
-              ';else->copyAndLaunchInternal(uri,name,"iso","dolphin")': '',
               ';"gcm","rvz"->"Nintendo GameCube • Dolphin";"wbfs","wia","wad","dol"->"Nintendo Wii / GameCube • Dolphin"': '',
               '"PS1 / PSP / PS2 / GC / Wii • choose engine"': '"PS1 / PSP / PS2 • choose engine"',
           }
-          for old, new in replacements.items():
-              s = s.replace(old, new)
-
-          # Rebuild ISO chooser explicitly to avoid stale fourth-option routing.
+          for old, new in replacements.items(): s = s.replace(old, new)
           s = re.sub(
               r'private fun showIsoChooser\(uri:Uri,name:String\)\{.*?\.setNegativeButton\("Batal",null\)\.show\(\)\}',
               'private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}',
-              s,
-              flags=re.S,
-          )
+              s, flags=re.S)
           main.write_text(s)
+
+          def remove_block(text, marker):
+              start = text.find(marker)
+              if start < 0: return text
+              brace = text.find('{', start)
+              if brace < 0: return text
+              depth = 0; i = brace; in_string = False; escape = False
+              while i < len(text):
+                  ch = text[i]
+                  if in_string:
+                      if escape: escape = False
+                      elif ch == '\\': escape = True
+                      elif ch == '"': in_string = False
+                  else:
+                      if ch == '"': in_string = True
+                      elif ch == '{': depth += 1
+                      elif ch == '}':
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              while end < len(text) and text[end] in ' \t': end += 1
+                              if end < len(text) and text[end] == '\n': end += 1
+                              return text[:start] + text[end:]
+                  i += 1
+              raise RuntimeError(f'unclosed block for {marker}')
 
           game = Path('app/src/main/java/com/ric/emuhub/GameActivity.kt')
           s = game.read_text()
@@ -111,97 +123,50 @@ jobs:
           s = s.replace('            coreId=="dolphin" -> GameProfile("gcwii-performance","Z9x GC/Wii Performance",2,Process.THREAD_PRIORITY_URGENT_DISPLAY,true)\n', '')
           s = s.replace('||coreId=="dolphin"', '')
           s = s.replace('"pcsx","ppsspp","dolphin"', '"pcsx","ppsspp"')
-
-          # Remove a balanced-brace block starting at a known marker.
-          def remove_block(text, marker):
-              start = text.find(marker)
-              if start < 0:
-                  return text
-              brace = text.find('{', start)
-              if brace < 0:
-                  return text
-              depth = 0
-              i = brace
-              in_string = False
-              escape = False
-              while i < len(text):
-                  ch = text[i]
-                  if in_string:
-                      if escape:
-                          escape = False
-                      elif ch == '\\':
-                          escape = True
-                      elif ch == '"':
-                          in_string = False
-                  else:
-                      if ch == '"':
-                          in_string = True
-                      elif ch == '{':
-                          depth += 1
-                      elif ch == '}':
-                          depth -= 1
-                          if depth == 0:
-                              end = i + 1
-                              while end < len(text) and text[end] in ' \t':
-                                  end += 1
-                              if end < len(text) and text[end] == '\n':
-                                  end += 1
-                              return text[:start] + text[end:]
-                  i += 1
-              raise RuntimeError(f'unclosed block for {marker}')
-
           s = remove_block(s, '        if (coreId == "dolphin") {')
-
-          # Remove any dedicated private Dolphin helper function still present.
           while True:
               m = re.search(r'^[ \t]*private fun [A-Za-z0-9_]*Dolphin[A-Za-z0-9_]*\([^\n]*', s, flags=re.M)
-              if not m:
-                  break
+              if not m: break
               s = remove_block(s, m.group(0))
-
           game.write_text(s)
 
-          # Remove Dolphin-only references from generic text assets if any survived.
+          cpp = Path('app/src/main/cpp/emuhost.cpp')
+          s = cpp.read_text()
+          s = s.replace('isPpsspp=false,isDolphin=false,shutdownRequested=false,firstRun=true,firstCapture=true', 'isPpsspp=false,shutdownRequested=false,firstRun=true,firstCapture=true')
+          s = re.sub(r'static const char\*dolphinOption\(const char\*k\)\{[^\n]*\}\n?', '', s)
+          s = s.replace('isPpsspp?ppssppOption(v->key):(isDolphin?dolphinOption(v->key):nullptr)', 'isPpsspp?ppssppOption(v->key):nullptr')
+          s = s.replace('isPpsspp=strstr(cp,"ppsspp")!=nullptr;isDolphin=strstr(cp,"dolphin")!=nullptr;systemDir=sp;saveDir=sv;traceLine(isDolphin?"init: dolphin detected":"init: non-dolphin core");', 'isPpsspp=strstr(cp,"ppsspp")!=nullptr;systemDir=sp;saveDir=sv;traceLine("init: core detected");')
+          s = s.replace('p_retro_set_controller_port_device(0,isDolphin?RETRO_DEVICE_JOYPAD:(isPpsspp?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD))', 'p_retro_set_controller_port_device(0,isPpsspp?RETRO_DEVICE_ANALOG:RETRO_DEVICE_JOYPAD)')
+          s = s.replace('core=nullptr;isPpsspp=isDolphin=shutdownRequested=false;', 'core=nullptr;isPpsspp=shutdownRequested=false;')
+          cpp.write_text(s)
+
           for base in [Path('app/src/main/assets'), Path('scripts')]:
-              if not base.exists():
-                  continue
+              if not base.exists(): continue
               for p in base.rglob('*'):
                   if p.is_file():
-                      try:
-                          text = p.read_text()
-                      except UnicodeDecodeError:
-                          continue
-                      if 'dolphin' in text.lower():
-                          p.unlink()
+                      try: text = p.read_text()
+                      except UnicodeDecodeError: continue
+                      if 'dolphin' in text.lower(): p.unlink()
 
-          # Fail rather than committing a half-clean source tree.
           leftovers = []
           for base in [Path('app/src/main'), Path('scripts')]:
-              if not base.exists():
-                  continue
+              if not base.exists(): continue
               for p in base.rglob('*'):
-                  if not p.is_file():
-                      continue
-                  try:
-                      text = p.read_text()
-                  except UnicodeDecodeError:
-                      continue
-                  if 'dolphin' in text.lower():
-                      leftovers.append(str(p))
+                  if not p.is_file(): continue
+                  try: text = p.read_text()
+                  except UnicodeDecodeError: continue
+                  if 'dolphin' in text.lower(): leftovers.append(str(p))
           if leftovers:
               raise SystemExit('Dolphin references remain in app source: ' + ', '.join(leftovers))
           PY
 
-          # The cleanup workflow is one-shot; remove it too so no Dolphin-named file remains.
           rm -f .github/workflows/remove-dolphin.yml
-
           echo 'Remaining Dolphin-named paths:'
           find . -not -path './.git/*' -iname '*dolphin*' -print
           if find . -not -path './.git/*' -iname '*dolphin*' -print -quit | grep -q .; then
             echo 'ERROR: Dolphin-named path still exists' >&2
             exit 1
           fi
-
           git status --short
 
       - name: Commit cleanup
