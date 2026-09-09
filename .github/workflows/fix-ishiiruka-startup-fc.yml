@@ -17,24 +17,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Defer Ishiiruka native load until module launch
+
+      - name: Load Ishiiruka native core only when GC/Wii module launches
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('app/src/main/java/com/ric/emuhub/EmuHubApp.kt')
-          s=p.read_text()
-          needle='            probeIshiirukaNativeLoad()\n'
-          if needle not in s:
-              raise SystemExit('startup preload call not found')
-          s=s.replace(needle,'',1)
+
+          p = Path('scripts/stage-ishiiruka-embedded.sh')
+          s = p.read_text()
+
+          old = '''        try{\\n            val clazz=Class.forName("org.dolphinemu.dolphinemu.activities.EmulationActivity")\\n            trace.edit().putString("stage","activity_intent_dispatched").commit()'''
+          new = '''        try{\\n            trace.edit().putString("stage","native_load").commit()\\n            System.loadLibrary("main")\\n            trace.edit().putString("stage","native_load_ok").commit()\\n            val clazz=Class.forName("org.dolphinemu.dolphinemu.activities.EmulationActivity")\\n            trace.edit().putString("stage","activity_intent_dispatched").commit()'''
+
+          if old not in s:
+              raise SystemExit('Ishiiruka launcher insertion point not found')
+          s = s.replace(old, new, 1)
           p.write_text(s)
           PY
+
           git diff --check
-          ! sed -n '/override fun onCreate()/,/installRuntimeCrashHandler()/p' app/src/main/java/com/ric/emuhub/EmuHubApp.kt | grep -q 'probeIshiirukaNativeLoad()'
-      - name: Commit runtime fix
+          grep -q 'System.loadLibrary("main")' scripts/stage-ishiiruka-embedded.sh
+          grep -q 'putString("stage","native_load_ok")' scripts/stage-ishiiruka-embedded.sh
+
+      - name: Commit JNI load-order fix
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/src/main/java/com/ric/emuhub/EmuHubApp.kt
-          git commit -m "fix: defer embedded Ishiiruka native load"
+          git add scripts/stage-ishiiruka-embedded.sh
+          git commit -m "fix: load Ishiiruka JNI before embedded activity"
           git push
