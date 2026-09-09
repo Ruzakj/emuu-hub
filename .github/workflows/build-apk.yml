@@ -26,9 +26,6 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "platforms;android-36" "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Stage embedded Ishiiruka 3.6.4-r1
-        run: bash scripts/stage-ishiiruka-embedded.sh
-
       - name: Restore cached mGBA core
         id: mgba-cache
         uses: actions/cache@v4
@@ -173,7 +170,6 @@ jobs:
           test -s app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
-          test -s embedded/ishiiruka/src/main/jniLibs/arm64-v8a/libmain.so
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -190,16 +186,17 @@ jobs:
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemuhost.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libppsspp_core.so'
           unzip -l "$APK" | grep 'lib/arm64-v8a/libemucore_4k.so'
-          unzip -l "$APK" | grep 'lib/arm64-v8a/libmain.so'
           unzip -l "$APK" | grep 'assets/builtin-roms/NES/Galaxy Patrol.nes'
           unzip -l "$APK" | grep 'assets/builtin-roms/GBA/Rkanoid Modern.gba'
           unzip -l "$APK" | grep 'assets/builtin-roms/SNES/Gothicvania.sfc'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/liblibrashader_capi.so'
           ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libppsspp_jni.so'
+          ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/libdolphin_core.so'
+          ! unzip -l "$APK" | grep -q 'assets/Dolphin/'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: EmuHub-Ishiiruka-Embedded-debug
+          name: EmuHub-External-GCWii-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
