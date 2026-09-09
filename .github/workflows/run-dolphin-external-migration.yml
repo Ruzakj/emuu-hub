@@ -1,0 +1,40 @@
+name: Run Dolphin external routing migration
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/run-dolphin-external-migration.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/migrate_dolphin_external.py
+
+          rm -f \
+            scripts/stage-ishiiruka-embedded.sh \
+            .github/workflows/fix-ishiiruka-libcpp.yml \
+            .github/workflows/fix-ishiiruka-startup-fc.yml \
+            .build-trigger-ishiiruka-20260908 \
+            .build-trigger-ishiiruka-jni-20260909 \
+            .github/workflows/migrate-dolphin-external.yml
+
+          echo 'Residual embedded Dolphin/Ishiiruka references:'
+          grep -RniE 'ishiiruka|libdolphin_core|assets/Dolphin|internal Dolphin|embedded Dolphin' app .github/workflows scripts 2>/dev/null || true
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Replace embedded Dolphin with external GC/Wii routing'
+          git push
