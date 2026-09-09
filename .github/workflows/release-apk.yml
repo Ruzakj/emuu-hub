@@ -74,7 +74,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Download internal libretro cores including Dolphin
+      - name: Download internal libretro cores
         shell: bash
         run: |
           set -euo pipefail
@@ -91,24 +91,6 @@ jobs:
           fetch_core snes9x libsnes9x_core.so
           fetch_core pcsx_rearmed libpcsx_rearmed_core.so
           fetch_core ppsspp libppsspp_core.so
-          fetch_core dolphin libdolphin_core.so
-          test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
-
-      - name: Stage Dolphin Sys runtime zip
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf /tmp/dolphin-libretro app/src/main/assets/Dolphin
-          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/libretro/dolphin.git /tmp/dolphin-libretro
-          test -s /tmp/dolphin-libretro/Data/Sys/GC/font_western.bin
-          test -s /tmp/dolphin-libretro/Data/Sys/GC/dsp_rom.bin
-          test -s /tmp/dolphin-libretro/Data/Sys/GC/dsp_coef.bin
-          mkdir -p app/src/main/assets/Dolphin
-          (cd /tmp/dolphin-libretro/Data/Sys && zip -qr "$GITHUB_WORKSPACE/app/src/main/assets/Dolphin/Sys.zip" .)
-          test -s app/src/main/assets/Dolphin/Sys.zip
-          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/font_western.bin'
-          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/dsp_rom.bin'
-          unzip -l app/src/main/assets/Dolphin/Sys.zip | grep -F 'GC/dsp_coef.bin'
 
       - name: Stage PPSSPP runtime assets
         run: |
@@ -144,15 +126,13 @@ jobs:
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"
 
-      - name: Prepare thin app shell but keep Dolphin internal
+      - name: Prepare thin app shell
         if: ${{ inputs.thin_shell }}
         shell: bash
         run: |
           set -euo pipefail
           rm -f app/src/main/jniLibs/arm64-v8a/libmgba_core.so app/src/main/jniLibs/arm64-v8a/libfceumm_core.so app/src/main/jniLibs/arm64-v8a/libsnes9x_core.so app/src/main/jniLibs/arm64-v8a/libpcsx_rearmed_core.so app/src/main/jniLibs/arm64-v8a/libppsspp_core.so
           rm -rf app/src/main/assets/PPSSPP
-          test -s app/src/main/jniLibs/arm64-v8a/libdolphin_core.so
-          test -s app/src/main/assets/Dolphin/Sys.zip
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -161,7 +141,7 @@ jobs:
       - name: Build stable signed release APK
         run: gradle assembleRelease --build-cache --parallel --stacktrace
 
-      - name: Verify signed APK contains Dolphin core and runtime zip
+      - name: Verify signed APK
         shell: bash
         run: |
           set -euo pipefail
@@ -169,14 +149,9 @@ jobs:
           test -n "$APK"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          unzip -l "$APK" | grep -F "lib/arm64-v8a/libdolphin_core.so"
           unzip -l "$APK" | grep -F "lib/arm64-v8a/libemuhost.so"
-          unzip -l "$APK" | grep -F "assets/Dolphin/Sys.zip"
-          unzip -p "$APK" assets/Dolphin/Sys.zip > /tmp/DolphinSys.zip
-          test -s /tmp/DolphinSys.zip
-          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/font_western.bin'
-          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/dsp_rom.bin'
-          unzip -l /tmp/DolphinSys.zip | grep -F 'GC/dsp_coef.bin'
+          ! unzip -l "$APK" | grep -q -F "lib/arm64-v8a/libdolphin_core.so"
+          ! unzip -l "$APK" | grep -q -F "assets/Dolphin/"
           mkdir -p dist
           cp "$APK" "dist/EmuHub-v${EMUHUB_VERSION_NAME}-arm64.apk"
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
@@ -195,7 +170,7 @@ jobs:
           fi
           gh release upload "$TAG" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qE '\.apk$'
-          echo "Release $TAG contains internal Dolphin and is ready for in-app update."
+          echo "Release $TAG uses external GameCube/Wii routing and is ready for in-app update."
 
       - uses: actions/upload-artifact@v4
         with:
