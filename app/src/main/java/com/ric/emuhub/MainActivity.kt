@@ -53,7 +53,7 @@ class MainActivity : Activity() {
         private val ARCHIVES = ArchiveHelper.ARCHIVE_EXTENSIONS
         private val RECOGNIZED = INTERNAL + SWITCH + GC_WII + ARCHIVES
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
-        private val DOLPHIN_PACKAGES = listOf("org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.mmjr","org.dolphinemu.mmjr2")
+        private val DOLPHIN_PACKAGES = listOf("org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.mmjr","org.dolphinemu.mmjr2","org.dolphinemu.mmjr3","org.mm.jr","org.mm.j","org.dolphinemu.handheld","org.dolphin.ishiirukadark")
         private val PSP_RES_VALUES = arrayOf("480x272","960x544")
         private val PSP_RES_LABELS = arrayOf("1× • 480×272 • Performance","2× • 960×544 • Recommended")
     }
@@ -697,14 +697,48 @@ class MainActivity : Activity() {
 
 
     private fun launchDolphinExternal(uri:Uri,name:String){
-        val pkg=DOLPHIN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{Toast.makeText(this,"Emulator GameCube/Wii eksternal tidak terdeteksi. Install Dolphin atau fork yang kompatibel.",Toast.LENGTH_LONG).show();return}
+        val pkg=DOLPHIN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{
+            Toast.makeText(this,"Emulator GameCube/Wii eksternal tidak terdeteksi. Install Dolphin atau fork yang kompatibel.",Toast.LENGTH_LONG).show();return
+        }
         val directPath=directGameFile(uri)?.absolutePath
-        val attempts=listOf(
-            Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,"application/octet-stream");setPackage(pkg);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)},
-            packageManager.getLaunchIntentForPackage(pkg)?.apply{putExtra("AutoStartFile",directPath?:uri.toString());putExtra("romPath",directPath?:uri.toString());putExtra("romName",name)}
-        ).filterNotNull()
-        for(intent in attempts){try{startActivity(intent);status.text="GameCube/Wii • external launcher";return}catch(_:Exception){}}
-        Toast.makeText(this,"Emulator terdeteksi tetapi ROM tidak bisa dikirim langsung.",Toast.LENGTH_LONG).show()
+        val uriValue=uri.toString()
+        val pathValue=directPath?:uriValue
+        val activity="org.dolphinemu.dolphinemu.ui.main.MainActivity"
+
+        // Dolphin official uses ACTION_MAIN + AutoStartFile URI. Several forks use ACTION_VIEW;
+        // path-based forks require a filesystem path instead of content:// URI.
+        val official = pkg=="org.dolphinemu.dolphinemu" || pkg=="org.dolphinemu.dolphinemu.dev"
+        val pathFork = pkg in setOf("org.mm.jr","org.mm.j","org.dolphin.ishiirukadark")
+        val primary=Intent(if(official) Intent.ACTION_MAIN else Intent.ACTION_VIEW).apply{
+            setClassName(pkg,activity)
+            putExtra("AutoStartFile",if(pathFork) pathValue else uriValue)
+            putExtra("romPath",pathValue)
+            putExtra("romName",name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)
+        }
+        if(official) primary.addCategory(Intent.CATEGORY_LAUNCHER)
+
+        try{
+            startActivity(primary)
+            status.text="GameCube/Wii • direct boot • ${pkg.substringAfterLast('.')}"
+            return
+        }catch(_:Exception){}
+
+        // Compatibility fallback: same explicit MainActivity, alternate action/value form.
+        val fallback=Intent(if(official) Intent.ACTION_VIEW else Intent.ACTION_MAIN).apply{
+            setClassName(pkg,activity)
+            putExtra("AutoStartFile",pathValue)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)
+        }
+        try{
+            startActivity(fallback)
+            status.text="GameCube/Wii • compatibility direct boot"
+            return
+        }catch(_:Exception){}
+
+        Toast.makeText(this,"Dolphin terdeteksi, tapi direct boot ROM ditolak oleh versi ini.",Toast.LENGTH_LONG).show()
         packageManager.getLaunchIntentForPackage(pkg)?.let{runCatching{startActivity(it)}}
     }
 
