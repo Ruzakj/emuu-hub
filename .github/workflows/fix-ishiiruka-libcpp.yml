@@ -1,0 +1,55 @@
+name: Fix Ishiiruka C++ Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-ishiiruka-libcpp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Preserve Ishiiruka libc++ runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/stage-ishiiruka-embedded.sh')
+          s = p.read_text()
+          old = 'rm -f "$MOD/src/main/jniLibs/arm64-v8a/libc++_shared.so"\n\ntest -s "$MOD/src/main/jniLibs/arm64-v8a/libmain.so"'
+          new = '# Keep the exact C++ runtime shipped with the verified Ishiiruka release.\n# libmain.so and companion Slippi libraries are linked against this runtime.\ntest -s "$MOD/src/main/jniLibs/arm64-v8a/libc++_shared.so"\ntest -s "$MOD/src/main/jniLibs/arm64-v8a/libmain.so"'
+          if old not in s:
+              raise SystemExit('expected libc++ removal block not found')
+          p.write_text(s.replace(old, new, 1))
+
+          w = Path('.github/workflows/build-apk.yml')
+          ws = w.read_text()
+          marker = "unzip -l \"$APK\" | grep 'lib/arm64-v8a/libmain.so'"
+          check = marker + "\n          unzip -l \"$APK\" | grep 'lib/arm64-v8a/libc++_shared.so'"
+          if check not in ws:
+              if marker not in ws:
+                  raise SystemExit('APK verification marker not found')
+              ws = ws.replace(marker, check, 1)
+              w.write_text(ws)
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/stage-ishiiruka-embedded.sh .github/workflows/build-apk.yml
+          if git diff --cached --quiet; then
+            echo 'No changes needed'
+            exit 0
+          fi
+          git commit -m 'fix: preserve Ishiiruka libc++ runtime for dlopen'
+          git push origin HEAD:main
