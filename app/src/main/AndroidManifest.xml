@@ -8,6 +8,10 @@
     <queries>
         <package android:name="dev.eden.eden_emulator" />
         <package android:name="dev.eden.eden_nightly" />
+        <package android:name="org.dolphinemu.dolphinemu" />
+        <package android:name="org.dolphinemu.dolphinemu.dev" />
+        <package android:name="org.dolphinemu.mmjr" />
+        <package android:name="org.dolphinemu.mmjr2" />
         <package android:name="com.miHoYo.Yuanshen" />
         <package android:name="com.miHoYo.Yunashen" />
         <package android:name="com.miHoYo.Yuanshen.nightly" />

@@ -49,9 +49,11 @@ class MainActivity : Activity() {
 
         private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")
         private val SWITCH = setOf("xci","nsp","nro")
+        private val GC_WII = setOf("gcm","gcz","rvz","wbfs","wia","wad","dol","elf")
         private val ARCHIVES = ArchiveHelper.ARCHIVE_EXTENSIONS
-        private val RECOGNIZED = INTERNAL + SWITCH + ARCHIVES
+        private val RECOGNIZED = INTERNAL + SWITCH + GC_WII + ARCHIVES
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
+        private val DOLPHIN_PACKAGES = listOf("org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.mmjr","org.dolphinemu.mmjr2")
         private val PSP_RES_VALUES = arrayOf("480x272","960x544")
         private val PSP_RES_LABELS = arrayOf("1× • 480×272 • Performance","2× • 960×544 • Recommended")
     }
@@ -183,7 +185,7 @@ class MainActivity : Activity() {
     private fun buildConsoleStrip():View{
         val hsv=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER;clipToPadding=false}
         val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        val consoles=listOf(arrayOf("PSP","PPSSPP","P"),arrayOf("PS1","PCSX","1"),arrayOf("PS2","ARMSX2","2"),arrayOf("GBA","mGBA","G"),arrayOf("NES","FCEUmm","N"),arrayOf("SNES","Snes9x","S"),arrayOf("JAVA","JL-Mod","J"),arrayOf("SWITCH","Eden","▰"))
+        val consoles=listOf(arrayOf("PSP","PPSSPP","P"),arrayOf("PS1","PCSX","1"),arrayOf("PS2","ARMSX2","2"),arrayOf("GBA","mGBA","G"),arrayOf("NES","FCEUmm","N"),arrayOf("SNES","Snes9x","S"),arrayOf("JAVA","JL-Mod","J"),arrayOf("GC/WII","External","◉"),arrayOf("SWITCH","Eden","▰"))
         consoles.forEachIndexed{index,item->
             val count=if(item[0]=="JAVA") null else allLibraryGames.count{inferredConsole(it)==item[0]}
             val chip=LinearLayout(this).apply{
@@ -257,6 +259,7 @@ class MainActivity : Activity() {
             "ps2" in t || "pcsx2" in t || "armsx2" in t || h.contains("playstation 2")->"PS2"
             "psp" in t || h.contains("playstation portable")->"PSP"
             "ps1" in t || "psx" in t || "psone" in t || h.contains("playstation 1")->"PS1"
+            "gamecube" in t || "ngc" in t || "wii" in t || h.contains("game cube")->"GC/WII"
             else->null
         }
     }
@@ -268,6 +271,7 @@ class MainActivity : Activity() {
             "gb","gbc","gba"->"GBA"
             "nes"->"NES"
             "sfc","smc"->"SNES"
+            in GC_WII->"GC/WII"
             "xci","nsp","nro"->"SWITCH"
             "iso"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
             "chd"->folderConsoleHint(g) ?: "DISC"
@@ -277,7 +281,7 @@ class MainActivity : Activity() {
         consoleHintCache[g.uri] = value
         return value
     }
-    private fun consoleRank(g:GameEntry)=when(inferredConsole(g)){"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"SWITCH"->6;"DISC"->7;"ARCHIVE"->8;else->99}
+    private fun consoleRank(g:GameEntry)=when(inferredConsole(g)){"PSP"->0;"PS1"->1;"PS2"->2;"GBA"->3;"NES"->4;"SNES"->5;"GC/WII"->6;"SWITCH"->7;"DISC"->8;"ARCHIVE"->9;else->99}
     private fun consoleGroup(g:GameEntry)=when(inferredConsole(g)){
         "PSP"->"PSP • PPSSPP"
         "PS1"->"PLAYSTATION • PCSX-REARMED"
@@ -285,6 +289,7 @@ class MainActivity : Activity() {
         "GBA"->"GAME BOY • MGBA"
         "NES"->"NES • FCEUMM"
         "SNES"->"SNES • SNES9X"
+        "GC/WII"->"GAMECUBE / WII • EXTERNAL"
         "SWITCH"->"NINTENDO SWITCH • EDEN"
         "DISC"->"DISC IMAGE • AUTO DETECT"
         "ARCHIVE"->"COMPRESSED ROMS • AUTO TEMP"
@@ -390,7 +395,7 @@ class MainActivity : Activity() {
     private fun buildFilterStrip():View{
         val hsv=HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER;clipToPadding=false}
         val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        val filters=listOf("ALL","PSP","PS1","PS2","GBA","NES","SNES","SWITCH","JAVA")
+        val filters=listOf("ALL","PSP","PS1","PS2","GBA","NES","SNES","GC/WII","SWITCH","JAVA")
         filters.forEachIndexed{i,label->
             val selected=(label=="ALL"&&activeConsoleFilter==null)||activeConsoleFilter==label
             val chip=textView(label,9.5f,if(selected)0xFF071018.toInt() else 0xFFB2BCC9.toInt(),true).apply{
@@ -422,7 +427,7 @@ class MainActivity : Activity() {
     }
 
     private fun consoleGlyph(g:GameEntry)=when(inferredConsole(g)){
-        "PSP"->"P";"PS1"->"1";"PS2"->"2";"GBA"->"G";"NES"->"N";"SNES"->"S";"SWITCH"->"▰";"DISC"->"◎";"ARCHIVE"->"◆";else->"•"
+        "PSP"->"P";"PS1"->"1";"PS2"->"2";"GBA"->"G";"NES"->"N";"SNES"->"S";"GC/WII"->"◉";"SWITCH"->"▰";"DISC"->"◎";"ARCHIVE"->"◆";else->"•"
     }
 
     private fun coverView(g:GameEntry,height:Int):View{
@@ -472,7 +477,7 @@ class MainActivity : Activity() {
     }
 
     private fun engineLabel(g:GameEntry)=when(inferredConsole(g)){
-        "PSP"->"PPSSPP";"PS1"->"PCSX";"PS2"->"ARMSX2";"GBA"->"mGBA";"NES"->"FCEUmm";"SNES"->"Snes9x";"SWITCH"->"EDEN";"DISC"->"AUTO";"ARCHIVE"->"AUTO";else->"CORE"
+        "PSP"->"PPSSPP";"PS1"->"PCSX";"PS2"->"ARMSX2";"GBA"->"mGBA";"NES"->"FCEUmm";"SNES"->"Snes9x";"GC/WII"->"EXTERNAL";"SWITCH"->"EDEN";"DISC"->"AUTO";"ARCHIVE"->"AUTO";else->"CORE"
     }
 
     private fun rememberPlayed(g:GameEntry){
@@ -491,12 +496,12 @@ class MainActivity : Activity() {
         }.getOrDefault(emptyList())
     }
 
-    private fun systemCode(e:String)=when(e){"gb","gbc","gba"->"GBA";"nes"->"NES";"sfc","smc"->"SNES";"bin","cue"->"PS1";"chd"->"CHD";"ecm"->"ECM";"iso"->"ISO";"cso"->"PSP";"xci","nsp","nro"->"NSW";in ARCHIVES->e.uppercase().take(4);else->e.uppercase().take(4)}
-    private fun systemColor(e:String)=when(e){"xci","nsp","nro"->0xFF243847.toInt();"bin","cue","chd","iso","ecm"->0xFF3A3347.toInt();"cso"->0xFF243C4B.toInt();"gba","gb","gbc"->0xFF2D4138.toInt();"nes"->0xFF493237.toInt();"sfc","smc"->0xFF39364A.toInt();in ARCHIVES->0xFF3A3A3A.toInt();else->0xFF303030.toInt()}
+    private fun systemCode(e:String)=when(e){"gb","gbc","gba"->"GBA";"nes"->"NES";"sfc","smc"->"SNES";"bin","cue"->"PS1";"chd"->"CHD";"ecm"->"ECM";"iso"->"ISO";"cso"->"PSP";in GC_WII->"GCW";"xci","nsp","nro"->"NSW";in ARCHIVES->e.uppercase().take(4);else->e.uppercase().take(4)}
+    private fun systemColor(e:String)=when(e){in GC_WII->0xFF31413F.toInt();"xci","nsp","nro"->0xFF243847.toInt();"bin","cue","chd","iso","ecm"->0xFF3A3347.toInt();"cso"->0xFF243C4B.toInt();"gba","gb","gbc"->0xFF2D4138.toInt();"nes"->0xFF493237.toInt();"sfc","smc"->0xFF39364A.toInt();in ARCHIVES->0xFF3A3A3A.toInt();else->0xFF303030.toInt()}
 
-    private fun systemCodeFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->"PSP";"PS1"->"PS1";"PS2"->"PS2";"GBA"->"GBA";"NES"->"NES";"SNES"->"SNES";"SWITCH"->"NSW";"DISC"->"DISC";"ARCHIVE"->g.ext.uppercase().take(4);else->systemCode(g.ext)}
-    private fun systemNameFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->"PSP • PPSSPP";"PS1"->"PlayStation • PCSX-ReARMed";"PS2"->"PlayStation 2 • ARMSX2 Vulkan";"GBA"->"Game Boy • mGBA";"NES"->"NES • FCEUmm";"SNES"->"SNES • Snes9x";"SWITCH"->"Nintendo Switch • Eden";"DISC"->"Disc image • auto detect on launch";else->systemName(g.ext)}
-    private fun systemColorFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->0xFF243C4B.toInt();"PS1"->0xFF3A3347.toInt();"PS2"->0xFF3B2D46.toInt();"GBA"->0xFF2D4138.toInt();"NES"->0xFF493237.toInt();"SNES"->0xFF39364A.toInt();"SWITCH"->0xFF243847.toInt();else->systemColor(g.ext)}
+    private fun systemCodeFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->"PSP";"PS1"->"PS1";"PS2"->"PS2";"GBA"->"GBA";"NES"->"NES";"SNES"->"SNES";"GC/WII"->"GCW";"SWITCH"->"NSW";"DISC"->"DISC";"ARCHIVE"->g.ext.uppercase().take(4);else->systemCode(g.ext)}
+    private fun systemNameFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->"PSP • PPSSPP";"PS1"->"PlayStation • PCSX-ReARMed";"PS2"->"PlayStation 2 • ARMSX2 Vulkan";"GBA"->"Game Boy • mGBA";"NES"->"NES • FCEUmm";"SNES"->"SNES • Snes9x";"GC/WII"->"GameCube / Wii • external emulator";"SWITCH"->"Nintendo Switch • Eden";"DISC"->"Disc image • auto detect on launch";else->systemName(g.ext)}
+    private fun systemColorFor(g:GameEntry)=when(inferredConsole(g)){"PSP"->0xFF243C4B.toInt();"PS1"->0xFF3A3347.toInt();"PS2"->0xFF3B2D46.toInt();"GBA"->0xFF2D4138.toInt();"NES"->0xFF493237.toInt();"SNES"->0xFF39364A.toInt();"GC/WII"->0xFF31413F.toInt();"SWITCH"->0xFF243847.toInt();else->systemColor(g.ext)}
 
     private fun probeIsoTarget(uri:Uri):String?{
         val file=directGameFile(uri)?:return null
@@ -527,6 +532,7 @@ class MainActivity : Activity() {
             "PS1"->copyAndLaunchInternal(uri,g.name,g.ext,"pcsx")
             "PS2"->launchPs2OrSetup(uri,g.name)
             "GBA","NES","SNES"->copyAndLaunchInternal(uri,g.name,g.ext,null)
+            "GC/WII"->launchDolphinExternal(uri,g.name)
             "SWITCH"->launchEden(uri)
             "ARCHIVE"->openArchive(uri,g.name)
             "DISC"->{
@@ -541,8 +547,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
-    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");else->launchPs2OrSetup(uri,name)}}.setNegativeButton("Batal",null).show()}
+    private fun openLibraryGame(uri:Uri,name:String,ext:String){when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in GC_WII->launchDolphinExternal(uri,name);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);else->copyAndLaunchInternal(uri,name,ext,null)}}
+    private fun showIsoChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open ISO with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PSP • PPSSPP","PlayStation 2 • ARMSX2 Vulkan","GameCube / Wii • External emulator")){_,which->when(which){0->copyAndLaunchInternal(uri,name,"iso","pcsx");1->showPspResolutionChooser(uri,name,"iso");2->launchPs2OrSetup(uri,name);else->launchDolphinExternal(uri,name)}}.setNegativeButton("Batal",null).show()}
     private fun showChdChooser(uri:Uri,name:String){AlertDialog.Builder(this).setTitle("Open CHD with").setItems(arrayOf("PlayStation 1 • PCSX-ReARMed","PlayStation 2 • ARMSX2 Vulkan")){_,which->if(which==0)copyAndLaunchInternal(uri,name,"chd","pcsx") else launchPs2OrSetup(uri,name)}.setNegativeButton("Batal",null).show()}
 
     private fun launchPs2OrSetup(uri:Uri,name:String){
@@ -598,6 +604,7 @@ class MainActivity : Activity() {
         "gb","gbc","gba"->"GBA"
         "nes"->"NES"
         "sfc","smc"->"SNES"
+        in GC_WII->"GC/WII"
         "xci","nsp","nro"->"SWITCH"
         "iso"->probeIsoTarget(Uri.fromFile(rom.file)) ?: "DISC"
         "chd"->"DISC"
@@ -627,6 +634,7 @@ class MainActivity : Activity() {
             }
             "cso"->showExtractedPspResolutionChooser(session,rom)
             "ecm"->decodeExtractedEcm(session,rom)
+            in GC_WII->{pendingArchiveSession=session.root;launchDolphinExternal(Uri.fromFile(rom.file),rom.displayName)}
             else->launchTempInternalFile(rom.file,coreIdFor(rom.ext),rom.displayName,session.root)
         }
     }
@@ -688,6 +696,18 @@ class MainActivity : Activity() {
     }
 
 
+    private fun launchDolphinExternal(uri:Uri,name:String){
+        val pkg=DOLPHIN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{Toast.makeText(this,"Emulator GameCube/Wii eksternal tidak terdeteksi. Install Dolphin atau fork yang kompatibel.",Toast.LENGTH_LONG).show();return}
+        val directPath=directGameFile(uri)?.absolutePath
+        val attempts=listOf(
+            Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,"application/octet-stream");setPackage(pkg);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)},
+            packageManager.getLaunchIntentForPackage(pkg)?.apply{putExtra("AutoStartFile",directPath?:uri.toString());putExtra("romPath",directPath?:uri.toString());putExtra("romName",name)}
+        ).filterNotNull()
+        for(intent in attempts){try{startActivity(intent);status.text="GameCube/Wii • external launcher";return}catch(_:Exception){}}
+        Toast.makeText(this,"Emulator terdeteksi tetapi ROM tidak bisa dikirim langsung.",Toast.LENGTH_LONG).show()
+        packageManager.getLaunchIntentForPackage(pkg)?.let{runCatching{startActivity(it)}}
+    }
+
     private fun launchEden(uri:Uri){
         val pkg=EDEN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{Toast.makeText(this,"Eden / Eden Optimized tidak terdeteksi.",Toast.LENGTH_LONG).show();return}
         try{startActivity(Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,"application/octet-stream");setPackage(pkg);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);clipData=ClipData.newRawUri("Switch ROM",uri)})}catch(_:ActivityNotFoundException){packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)}catch(_:Exception){packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)}
@@ -695,7 +715,7 @@ class MainActivity : Activity() {
 
     private fun displayName(uri:Uri):String?{if(uri.scheme=="content")contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use{c->if(c.moveToFirst()){val i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(i>=0)return c.getString(i)}};return uri.lastPathSegment?.substringAfterLast('/')}
     private fun extension(name:String?)=name.orEmpty().substringAfterLast('.',"").lowercase()
-    private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"Nintendo Entertainment System • FCEUmm";"sfc","smc"->"Super Nintendo • Snes9x";"bin","cue"->"PlayStation • PCSX-ReARMed";"chd"->"PlayStation / PS2 • choose engine";"ecm"->"PlayStation • ECM auto decode";"iso"->"PS1 / PSP / PS2 • choose engine";"cso"->"PSP • PPSSPP";"xci","nsp","nro"->"Nintendo Switch • Eden Optimized";in ARCHIVES->"Compressed ROM • temporary auto extract";else->"ROM"}
+    private fun systemName(e:String)=when(e){"gb","gbc","gba"->"Game Boy • mGBA";"nes"->"Nintendo Entertainment System • FCEUmm";"sfc","smc"->"Super Nintendo • Snes9x";"bin","cue"->"PlayStation • PCSX-ReARMed";"chd"->"PlayStation / PS2 • choose engine";"ecm"->"PlayStation • ECM auto decode";"iso"->"PS1 / PSP / PS2 / GC-Wii • choose engine";"cso"->"PSP • PPSSPP";in GC_WII->"GameCube / Wii • external emulator";"xci","nsp","nro"->"Nintendo Switch • Eden Optimized";in ARCHIVES->"Compressed ROM • temporary auto extract";else->"ROM"}
     private fun cacheKey(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString(""){"%02x".format(it)}.take(24)
 
     private fun directGameFile(uri:Uri):File?{
@@ -758,7 +778,7 @@ class MainActivity : Activity() {
         if(requestCode==REQUEST_ARCHIVE_GAME){pendingArchiveSession?.deleteRecursively();pendingArchiveSession=null;status.text="Temporary archive files deleted";return}
         if(resultCode!=RESULT_OK)return
         if(requestCode==REQUEST_FOLDER){val uri=data?.data?:return;runCatching{contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};val set=prefs.getStringSet(KEY_ROM_TREES,emptySet())?.toMutableSet()?:mutableSetOf();set.add(uri.toString());prefs.edit().putStringSet(KEY_ROM_TREES,set).apply();refreshAllFolders(true);return}
-        if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
+        if(requestCode==REQUEST_ROM){val uri=data?.data?:return;val name=displayName(uri)?:"ROM";val ext=extension(name);when{ext in ARCHIVES->openArchive(uri,name);ext in SWITCH->launchEden(uri);ext in GC_WII->launchDolphinExternal(uri,name);ext=="ecm"->decodeAndLaunchEcm(uri,name);ext=="iso"->showIsoChooser(uri,name);ext=="chd"->showChdChooser(uri,name);ext=="cso"->showPspResolutionChooser(uri,name,ext);ext in INTERNAL->copyAndLaunchInternal(uri,name,ext,null);else->Toast.makeText(this,"Format belum didukung: .$ext",Toast.LENGTH_LONG).show()}}
     }
 
     override fun onDestroy(){scanExecutor.shutdownNow();super.onDestroy()}
