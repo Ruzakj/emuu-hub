@@ -18,13 +18,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required Android toolchain
+      - name: Configure Android SDK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "platforms;android-36" "ndk;27.0.12077973" "cmake;3.22.1"
+          set -euxo pipefail
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "ndk;27.0.12077973" \
+            "cmake;3.22.1"
 
       - name: Restore cached mGBA core
         id: mgba-cache
@@ -120,23 +128,15 @@ jobs:
           rm -rf /tmp/armsx2-runtime
           mkdir -p /tmp/armsx2-runtime app/src/main/jniLibs/arm64-v8a app/src/main/assets/ARMSX2
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ARMSX2-Android-ARM64-Runtime -D /tmp/armsx2-runtime
-
           test -d /tmp/armsx2-runtime/jniLibs/arm64-v8a
           test -d /tmp/armsx2-runtime/assets/ARMSX2
-
           cp -a /tmp/armsx2-runtime/jniLibs/arm64-v8a/. app/src/main/jniLibs/arm64-v8a/
           rm -rf app/src/main/assets/ARMSX2
           mkdir -p app/src/main/assets/ARMSX2
           cp -a /tmp/armsx2-runtime/assets/ARMSX2/. app/src/main/assets/ARMSX2/
-
-          echo 'ARMSX2 lean native runtime staged:'
-          find app/src/main/jniLibs/arm64-v8a -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
           test -s app/src/main/jniLibs/arm64-v8a/libemucore_4k.so
           test -s app/src/main/assets/ARMSX2/GameIndex.yaml
-          if readelf -d app/src/main/jniLibs/arm64-v8a/libemucore_4k.so | grep -q 'liblibrashader_capi.so'; then
-            echo 'ERROR: staged lean core still depends on librashader' >&2
-            exit 1
-          fi
+          if readelf -d app/src/main/jniLibs/arm64-v8a/libemucore_4k.so | grep -q 'liblibrashader_capi.so'; then exit 1; fi
 
       - name: Stage small legal homebrew starter ROMs
         run: |
@@ -144,18 +144,11 @@ jobs:
           ROOT=app/src/main/assets/builtin-roms
           rm -rf "$ROOT"
           mkdir -p "$ROOT/NES" "$ROOT/GBA" "$ROOT/SNES"
-
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/rlannon/NES_GalaxyPatrol/master/galaxypatrol.nes" -o "$ROOT/NES/Galaxy Patrol.nes"
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20MODERN%20-%20RECOMPILED.gba" -o "$ROOT/GBA/Rkanoid Modern.gba"
           curl --retry 3 --retry-delay 2 -fL "https://raw.githubusercontent.com/benoror/gbadev/master/public/roms/%40rkanoid%20LATEST%20-%20DEMO.gba" -o "$ROOT/GBA/Rkanoid Demo.gba"
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/gothicvania.sfc" -o "$ROOT/SNES/Gothicvania.sfc"
           curl --retry 3 --retry-delay 2 -fL "https://github.com/donth77/snes-homebrew/releases/download/v1.0.0/hello-world-region.sfc" -o "$ROOT/SNES/Hello World Region.sfc"
-
-          cat > "$ROOT/NOTICE.txt" <<'EOF'
-          Emu Hub Built-in Homebrew Starter Pack
-          Only freely redistributable homebrew is bundled here. No commercial ROMs are included.
-          EOF
-
           test -s "$ROOT/NES/Galaxy Patrol.nes"
           test -s "$ROOT/GBA/Rkanoid Modern.gba"
           test -s "$ROOT/GBA/Rkanoid Demo.gba"
