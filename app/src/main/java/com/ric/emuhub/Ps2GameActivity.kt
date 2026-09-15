@@ -5,7 +5,10 @@ import android.app.AlertDialog
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -112,21 +115,25 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         buildGameUi(); prepareRuntime()
     }
 
-    private fun rounded(alpha: Int = 0x77): GradientDrawable = GradientDrawable().apply {
-        setColor(Color.argb(alpha, 18, 18, 18)); cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.argb(110, 255, 255, 255))
+    private fun padShape(round:Boolean=false,pressed:Boolean=false,alpha:Int=150):GradientDrawable=GradientDrawable().apply{
+        shape=if(round)GradientDrawable.OVAL else GradientDrawable.RECTANGLE
+        cornerRadius=if(round)999f else dp(18).toFloat()
+        if(pressed){setColor(Color.argb((alpha+55).coerceAtMost(235),46,92,128));setStroke(dp(2),Color.argb(225,184,226,255))}
+        else{setColor(Color.argb(alpha,19,22,27));setStroke(dp(1),Color.argb(118,255,255,255))}
     }
+    private fun padState(round:Boolean=false,alpha:Int=150)=StateListDrawable().apply{
+        addState(intArrayOf(android.R.attr.state_pressed),padShape(round,true,alpha));addState(intArrayOf(),padShape(round,false,alpha))
+    }
+    private fun controllerShell()=View(this).apply{background=GradientDrawable().apply{shape=GradientDrawable.RECTANGLE;cornerRadius=dp(44).toFloat();setColor(Color.argb(58,13,15,19));setStroke(dp(1),Color.argb(54,255,255,255))}}
+    private fun rounded(alpha: Int = 0x77): GradientDrawable = padShape(false,false,alpha)
 
     private fun control(text: String, keyCode: Int, size: Int = 54): Button = Button(this).apply {
-        this.text = text; textSize = 16f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded()
-        setPadding(0, 0, 0, 0); minWidth = 0; minHeight = 0
-        setOnTouchListener { v, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { v.isPressed = true; sendPad(keyCode, true) }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { v.isPressed = false; sendPad(keyCode, false) }
-            }
-            true
-        }
-        layoutParams = FrameLayout.LayoutParams(dp(size), dp(size))
+        val round=text !in setOf("L1","L2","R1","R2","L3","R3","SELECT","START")
+        this.text=text;textSize=if(text.length>3)9f else if(text.length>2)10f else 16f;typeface=Typeface.create(Typeface.DEFAULT,Typeface.BOLD)
+        isAllCaps=false;setTextColor(Color.WHITE);background=padState(round,if(round)145 else 132);stateListAnimator=null
+        setPadding(0,0,0,0);minWidth=0;minHeight=0
+        setOnTouchListener { v,e -> when(e.actionMasked){MotionEvent.ACTION_DOWN->{v.isPressed=true;sendPad(keyCode,true);v.alpha=1f};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{v.isPressed=false;sendPad(keyCode,false);v.alpha=.92f}};true }
+        alpha=.92f;layoutParams=FrameLayout.LayoutParams(dp(size),dp(size))
     }
 
     private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54) {
@@ -136,56 +143,26 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private inner class AnalogStickView(private val rightStick: Boolean = false) : View(this@Ps2GameActivity) {
-        private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(105, 24, 24, 24); style = Paint.Style.FILL }
-        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat() }
-        private val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(175, 150, 150, 150); style = Paint.Style.FILL }
-        private var knobX = 0f
-        private var knobY = 0f
+        private val basePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(94,17,20,25)}
+        private val ringPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(132,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val guidePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(48,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(1).toFloat()}
+        private val knobPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(215,76,81,90)}
+        private val knobStroke=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(170,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val shinePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(46,255,255,255)}
+        private var knobX=0f;private var knobY=0f;private var active=false
+        override fun onDraw(canvas:Canvas){super.onDraw(canvas);val cx=width/2f;val cy=height/2f;val outer=min(width,height)*.45f;val knob=outer*.43f;canvas.drawCircle(cx,cy,outer,basePaint);canvas.drawCircle(cx,cy,outer,ringPaint);canvas.drawCircle(cx,cy,outer*.70f,guidePaint);canvas.drawCircle(cx,cy,outer*.36f,guidePaint);knobPaint.color=if(active)Color.rgb(57,105,142)else Color.rgb(76,81,90);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobStroke);canvas.drawCircle(cx+knobX-knob*.22f,cy+knobY-knob*.24f,knob*.30f,shinePaint)}
+        override fun onTouchEvent(event:MotionEvent):Boolean{when(event.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{active=true;val cx=width/2f;val cy=height/2f;var dx=event.x-cx;var dy=event.y-cy;val limit=min(width,height)*.36f;val dist=hypot(dx.toDouble(),dy.toDouble()).toFloat();if(dist>limit&&dist>0f){val scale=limit/dist;dx*=scale;dy*=scale};knobX=dx;knobY=dy;val nx=(dx/limit).coerceIn(-1f,1f);val ny=(dy/limit).coerceIn(-1f,1f);if(rightStick){sendAnalogPair(nx,PAD_R_LEFT,PAD_R_RIGHT);sendAnalogPair(ny,PAD_R_UP,PAD_R_DOWN)}else{sendAnalogPair(nx,PAD_L_LEFT,PAD_L_RIGHT);sendAnalogPair(ny,PAD_L_UP,PAD_L_DOWN)};invalidate()};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{active=false;knobX=0f;knobY=0f;if(rightStick){sendPad(PAD_R_LEFT,false);sendPad(PAD_R_RIGHT,false);sendPad(PAD_R_UP,false);sendPad(PAD_R_DOWN,false)}else{sendPad(PAD_L_LEFT,false);sendPad(PAD_L_RIGHT,false);sendPad(PAD_L_UP,false);sendPad(PAD_L_DOWN,false)};invalidate()}};return true}
+    }
 
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val cx = width / 2f; val cy = height / 2f
-            val outer = min(width, height) * 0.46f
-            val knob = outer * 0.42f
-            canvas.drawCircle(cx, cy, outer, basePaint)
-            canvas.drawCircle(cx, cy, outer, ringPaint)
-            canvas.drawCircle(cx + knobX, cy + knobY, knob, knobPaint)
-        }
-
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                    val cx = width / 2f; val cy = height / 2f
-                    var dx = event.x - cx; var dy = event.y - cy
-                    val limit = min(width, height) * 0.36f
-                    val dist = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                    if (dist > limit && dist > 0f) { val scale = limit / dist; dx *= scale; dy *= scale }
-                    knobX = dx; knobY = dy
-                    val nx = (dx / limit).coerceIn(-1f, 1f)
-                    val ny = (dy / limit).coerceIn(-1f, 1f)
-                    if (rightStick) {
-                        sendAnalogPair(nx, PAD_R_LEFT, PAD_R_RIGHT)
-                        sendAnalogPair(ny, PAD_R_UP, PAD_R_DOWN)
-                    } else {
-                        sendAnalogPair(nx, PAD_L_LEFT, PAD_L_RIGHT)
-                        sendAnalogPair(ny, PAD_L_UP, PAD_L_DOWN)
-                    }
-                    invalidate()
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    knobX = 0f; knobY = 0f
-                    if (rightStick) {
-                        sendPad(PAD_R_LEFT, false); sendPad(PAD_R_RIGHT, false)
-                        sendPad(PAD_R_UP, false); sendPad(PAD_R_DOWN, false)
-                    } else {
-                        sendPad(PAD_L_LEFT, false); sendPad(PAD_L_RIGHT, false)
-                        sendPad(PAD_L_UP, false); sendPad(PAD_L_DOWN, false)
-                    }
-                    invalidate()
-                }
-            }
-            return true
-        }
+    private inner class DPadView:View(this@Ps2GameActivity){
+        private val base=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(160,31,34,40)}
+        private val pressed=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(225,49,94,130)}
+        private val outline=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(135,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val arrow=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(225,255,255,255);textAlign=Paint.Align.CENTER;typeface=Typeface.create(Typeface.DEFAULT,Typeface.BOLD)}
+        private var active=-1
+        override fun onDraw(c:Canvas){val size=min(width,height).toFloat();val cx=width/2f;val cy=height/2f;val arm=size*.34f;val half=size*.48f;val r=arm*.24f;val v=RectF(cx-arm/2,cy-half,cx+arm/2,cy+half);val h=RectF(cx-half,cy-arm/2,cx+half,cy+arm/2);c.drawRoundRect(v,r,r,base);c.drawRoundRect(h,r,r,base);c.drawRoundRect(v,r,r,outline);c.drawRoundRect(h,r,r,outline);when(active){KeyEvent.KEYCODE_DPAD_UP->c.drawRoundRect(RectF(cx-arm/2,cy-half,cx+arm/2,cy),r,r,pressed);KeyEvent.KEYCODE_DPAD_DOWN->c.drawRoundRect(RectF(cx-arm/2,cy,cx+arm/2,cy+half),r,r,pressed);KeyEvent.KEYCODE_DPAD_LEFT->c.drawRoundRect(RectF(cx-half,cy-arm/2,cx,cy+arm/2),r,r,pressed);KeyEvent.KEYCODE_DPAD_RIGHT->c.drawRoundRect(RectF(cx,cy-arm/2,cx+half,cy+arm/2),r,r,pressed)};arrow.textSize=size*.15f;val fm=arrow.fontMetrics;val adj=-(fm.ascent+fm.descent)/2;c.drawText("▲",cx,cy-size*.29f+adj,arrow);c.drawText("▼",cx,cy+size*.29f+adj,arrow);c.drawText("◀",cx-size*.29f,cy+adj,arrow);c.drawText("▶",cx+size*.29f,cy+adj,arrow)}
+        private fun keyAt(x:Float,y:Float):Int{val dx=x-width/2f;val dy=y-height/2f;return if(abs(dx)>abs(dy)){if(dx<0)KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT}else{if(dy<0)KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN}}
+        override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{val key=keyAt(e.x,e.y);if(key!=active){if(active>=0)sendPad(active,false);active=key;sendPad(active,true);invalidate()}};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(active>=0)sendPad(active,false);active=-1;invalidate()}};return true}
     }
 
     private fun buildGameUi() {
@@ -206,6 +183,9 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             }
             root.addView(perfOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(126); topMargin = dp(36) })
 
+            addControl(root,controllerShell(),Gravity.BOTTOM or Gravity.START,left=8,bottom=5,w=350,h=194)
+            addControl(root,controllerShell(),Gravity.BOTTOM or Gravity.END,right=8,bottom=5,w=350,h=194)
+
             // Compact top controls: shoulders stay at corners, system actions no longer stack over gameplay center.
             addControl(root, control("L2", KeyEvent.KEYCODE_BUTTON_L2, 44), Gravity.TOP or Gravity.START, left = 8, top = 8, w = 44, h = 36)
             addControl(root, control("L1", KeyEvent.KEYCODE_BUTTON_L1, 44), Gravity.TOP or Gravity.START, left = 58, top = 8, w = 44, h = 36)
@@ -213,10 +193,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 44), Gravity.TOP or Gravity.END, right = 108, top = 8, w = 44, h = 36)
             addControl(root, Button(this).apply { text = "TUNE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.END, top = 8, right = 58, w = 46, h = 36)
             addControl(root, Button(this).apply { text = "EXIT"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 8, w = 46, h = 36)
-            addControl(root, control("▲", KeyEvent.KEYCODE_DPAD_UP), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 126)
-            addControl(root, control("▼", KeyEvent.KEYCODE_DPAD_DOWN), Gravity.BOTTOM or Gravity.START, left = 72, bottom = 18)
-            addControl(root, control("◀", KeyEvent.KEYCODE_DPAD_LEFT), Gravity.BOTTOM or Gravity.START, left = 18, bottom = 72)
-            addControl(root, control("▶", KeyEvent.KEYCODE_DPAD_RIGHT), Gravity.BOTTOM or Gravity.START, left = 126, bottom = 72)
+            addControl(root,DPadView(),Gravity.BOTTOM or Gravity.START,left=18,bottom=18,w=160,h=160)
             addControl(root, AnalogStickView(false), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
             addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 252, bottom = 150, w = 42, h = 32)
             addControl(root, AnalogStickView(true), Gravity.BOTTOM or Gravity.END, right = 205, bottom = 28, w = 132, h = 132)

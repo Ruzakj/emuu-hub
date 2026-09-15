@@ -3,8 +3,12 @@ package com.ric.emuhub
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -122,13 +126,45 @@ class GameActivity : Activity() {
     private fun shutdownCore() { if (cleanedUp) return; cleanedUp=true; gameView?.stop(); NativeBridge.setAnalog(0,0); NativeBridge.unload(); if(::coreTraceFile.isInitialized) coreTracePrefs.edit().putBoolean("active",false).putString("stage","clean_exit").apply() }
     private fun showLoadError(message:String){setContentView(TextView(this).apply{text=message;gravity=Gravity.CENTER;textSize=18f;setTextColor(0xFFFFFFFF.toInt());setBackgroundColor(0xFF050507.toInt());setPadding(dp(24),dp(24),dp(24),dp(24))})}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
-    private fun translucentBackground(alpha:Int=120,stroke:Boolean=true,radiusDp:Int=18)=GradientDrawable().apply{shape=GradientDrawable.RECTANGLE;cornerRadius=dp(radiusDp).toFloat();setColor((alpha shl 24) or 0x00202024);if(stroke)setStroke(dp(1),0x55FFFFFF)}
-    private fun roundBackground(alpha:Int=105)=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor((alpha shl 24) or 0x00202024);setStroke(dp(1),0x55FFFFFF)}
-    private fun gameButton(label:String,id:Int,sizeDp:Int=58)=Button(this).apply{text=label;textSize=if(label.length>2)11f else 17f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;includeFontPadding=false;setPadding(0,0,0,0);background=roundBackground();alpha=.82f;setTextColor(0xFFFFFFFF.toInt());setOnTouchListener{v,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->{NativeBridge.setButton(id,true);v.alpha=1f};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{NativeBridge.setButton(id,false);v.alpha=.82f}};true}}
-    private fun smallOverlayButton(label:String,onClick:(Button)->Unit)=Button(this).apply{text=label;textSize=10f;minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(8),0,dp(8),0);setTextColor(0xFFFFFFFF.toInt());background=translucentBackground(105,radiusDp=12);alpha=.78f;setOnClickListener{onClick(this)}}
+    private fun padShape(round:Boolean=false, pressed:Boolean=false, alpha:Int=154)=GradientDrawable().apply{
+        shape=if(round) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
+        cornerRadius=if(round) 999f else dp(18).toFloat()
+        if(pressed){
+            setColor(Color.argb((alpha+50).coerceAtMost(235),46,92,128))
+            setStroke(dp(2),Color.argb(225,184,226,255))
+        }else{
+            setColor(Color.argb(alpha,19,22,27))
+            setStroke(dp(1),Color.argb(118,255,255,255))
+        }
+    }
+    private fun padState(round:Boolean=false,alpha:Int=154)=StateListDrawable().apply{
+        addState(intArrayOf(android.R.attr.state_pressed),padShape(round,true,alpha))
+        addState(intArrayOf(),padShape(round,false,alpha))
+    }
+    private fun controllerShell()=View(this).apply{
+        background=GradientDrawable().apply{shape=GradientDrawable.RECTANGLE;cornerRadius=dp(44).toFloat();setColor(Color.argb(58,13,15,19));setStroke(dp(1),Color.argb(54,255,255,255))}
+    }
+    private fun translucentBackground(alpha:Int=120,stroke:Boolean=true,radiusDp:Int=18)=padShape(false,false,alpha)
+    private fun roundBackground(alpha:Int=105)=padShape(true,false,alpha)
+    private fun gameButton(label:String,id:Int,sizeDp:Int=58)=Button(this).apply{
+        val round=label !in setOf("L","R","L1","R1","L2","R2","SELECT","START")
+        text=label;textSize=if(label.length>3)9f else if(label.length>2)10f else 17f
+        typeface=Typeface.create(Typeface.DEFAULT,Typeface.BOLD)
+        minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;includeFontPadding=false;setPadding(0,0,0,0)
+        background=padState(round,if(round)145 else 132);alpha=.92f;setTextColor(Color.WHITE);stateListAnimator=null
+        setOnTouchListener{v,e->when(e.actionMasked){MotionEvent.ACTION_DOWN->{NativeBridge.setButton(id,true);v.alpha=1f};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{NativeBridge.setButton(id,false);v.alpha=.92f}};true}
+    }
+    private fun smallOverlayButton(label:String,onClick:(Button)->Unit)=Button(this).apply{
+        text=label;textSize=9f;typeface=Typeface.create(Typeface.DEFAULT,Typeface.BOLD);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
+        setPadding(dp(8),0,dp(8),0);setTextColor(Color.WHITE);background=padState(false,105);alpha=.86f;stateListAnimator=null;setOnClickListener{onClick(this)}
+    }
 
     private fun buildGamepadOverlay(coreId:String):View{
-        val overlay=FrameLayout(this);val tools=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
+        val overlay=FrameLayout(this)
+        val dualStick=coreId=="pcsx"||coreId=="ppsspp"
+        overlay.addView(controllerShell(),FrameLayout.LayoutParams(dp(if(dualStick)350 else 210),dp(194),Gravity.BOTTOM or Gravity.START).apply{leftMargin=dp(8);bottomMargin=dp(5)})
+        overlay.addView(controllerShell(),FrameLayout.LayoutParams(dp(220),dp(194),Gravity.BOTTOM or Gravity.END).apply{rightMargin=dp(8);bottomMargin=dp(5)})
+        val tools=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
         listOf("SAVE","LOAD","FAST","RESET").forEach{label->val b=smallOverlayButton(label){button->when(label){"SAVE"->Toast.makeText(this,if(NativeBridge.saveState(stateFile.absolutePath))"State tersimpan" else "Save gagal",Toast.LENGTH_SHORT).show();"LOAD"->Toast.makeText(this,if(stateFile.exists()&&NativeBridge.loadState(stateFile.absolutePath))"State dimuat" else "Load gagal",Toast.LENGTH_SHORT).show();"FAST"->{fastForward=!fastForward;button.text=if(fastForward)"FAST ON" else "FAST";gameView?.onFastForwardChanged(fastForward)};"RESET"->NativeBridge.reset()}};tools.addView(b,LinearLayout.LayoutParams(dp(62),dp(34)).apply{marginEnd=dp(5)})}
         overlay.addView(tools,FrameLayout.LayoutParams(-2,dp(38),Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=dp(8)})
         overlay.addView(gameButton("L",10,64),FrameLayout.LayoutParams(dp(64),dp(42),Gravity.TOP or Gravity.START).apply{leftMargin=dp(28);topMargin=dp(58)})
@@ -142,8 +178,46 @@ class GameActivity : Activity() {
         val center=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER};center.addView(gameButton("SELECT",2,64),LinearLayout.LayoutParams(dp(72),dp(38)).apply{marginEnd=dp(10)});center.addView(gameButton("START",3,64),LinearLayout.LayoutParams(dp(72),dp(38)));overlay.addView(center,FrameLayout.LayoutParams(-2,dp(44),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply{bottomMargin=dp(20)});return overlay
     }
 
-    inner class AnalogStickView:View(this@GameActivity){private val basePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x552A2A30};private val ringPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x66FFFFFF;style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()};private val knobPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xAA5A5A62.toInt()};private var knobX=0f;private var knobY=0f;override fun onDraw(canvas:Canvas){val cx=width/2f;val cy=height/2f;val outer=min(width,height)*.44f;val knob=outer*.42f;canvas.drawCircle(cx,cy,outer,basePaint);canvas.drawCircle(cx,cy,outer,ringPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,ringPaint)};override fun onTouchEvent(e:MotionEvent):Boolean{val cx=width/2f;val cy=height/2f;val max=min(width,height)*.34f;when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{var dx=e.x-cx;var dy=e.y-cy;val d=sqrt(dx*dx+dy*dy);if(d>max&&d>0f){dx=dx/d*max;dy=dy/d*max};knobX=dx;knobY=dy;NativeBridge.setAnalog(((dx/max)*32767).toInt(),((dy/max)*32767).toInt());invalidate()};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{knobX=0f;knobY=0f;NativeBridge.setAnalog(0,0);invalidate()}};return true}}
-    inner class DPadView:View(this@GameActivity){private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0x8838383F.toInt()};private val textPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xDDFFFFFF.toInt();textSize=dp(24).toFloat();textAlign=Paint.Align.CENTER};private var activeId=-1;override fun onDraw(c:Canvas){val w=width/3f;val h=height/3f;c.drawRoundRect(w,0f,2*w,height.toFloat(),dp(8).toFloat(),dp(8).toFloat(),paint);c.drawRoundRect(0f,h,width.toFloat(),2*h,dp(8).toFloat(),dp(8).toFloat(),paint);c.drawText("↑",width/2f,h*.72f,textPaint);c.drawText("↓",width/2f,h*2.78f,textPaint);c.drawText("←",w*.5f,height/2f+textPaint.textSize/3,textPaint);c.drawText("→",w*2.5f,height/2f+textPaint.textSize/3,textPaint)};private fun idAt(x:Float,y:Float):Int{val dx=x-width/2f;val dy=y-height/2f;return if(kotlin.math.abs(dx)>kotlin.math.abs(dy)){if(dx<0)6 else 7}else{if(dy<0)4 else 5}};override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{val id=idAt(e.x,e.y);if(id!=activeId){if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=id;NativeBridge.setButton(id,true)}};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=-1}};return true}}
+    inner class AnalogStickView:View(this@GameActivity){
+        private val basePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(94,17,20,25)}
+        private val ringPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(132,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val guidePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(48,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(1).toFloat()}
+        private val knobPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(215,76,81,90)}
+        private val knobStroke=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(170,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val shinePaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(46,255,255,255)}
+        private var knobX=0f;private var knobY=0f;private var active=false
+        override fun onDraw(canvas:Canvas){
+            val cx=width/2f;val cy=height/2f;val outer=min(width,height)*.45f;val knob=outer*.43f
+            canvas.drawCircle(cx,cy,outer,basePaint);canvas.drawCircle(cx,cy,outer,ringPaint);canvas.drawCircle(cx,cy,outer*.70f,guidePaint);canvas.drawCircle(cx,cy,outer*.36f,guidePaint)
+            knobPaint.color=if(active)Color.rgb(57,105,142) else Color.rgb(76,81,90)
+            canvas.drawCircle(cx+knobX,cy+knobY,knob,knobPaint);canvas.drawCircle(cx+knobX,cy+knobY,knob,knobStroke)
+            canvas.drawCircle(cx+knobX-knob*.22f,cy+knobY-knob*.24f,knob*.30f,shinePaint)
+        }
+        override fun onTouchEvent(e:MotionEvent):Boolean{
+            val cx=width/2f;val cy=height/2f;val max=min(width,height)*.34f
+            when(e.actionMasked){
+                MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{active=true;var dx=e.x-cx;var dy=e.y-cy;val d=sqrt(dx*dx+dy*dy);if(d>max&&d>0f){dx=dx/d*max;dy=dy/d*max};knobX=dx;knobY=dy;NativeBridge.setAnalog(((dx/max)*32767).toInt(),((dy/max)*32767).toInt());invalidate()}
+                MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{active=false;knobX=0f;knobY=0f;NativeBridge.setAnalog(0,0);invalidate()}
+            };return true
+        }
+    }
+    inner class DPadView:View(this@GameActivity){
+        private val base=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(160,31,34,40)}
+        private val pressed=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(225,49,94,130)}
+        private val outline=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(135,255,255,255);style=Paint.Style.STROKE;strokeWidth=dp(2).toFloat()}
+        private val arrow=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(225,255,255,255);textAlign=Paint.Align.CENTER;typeface=Typeface.create(Typeface.DEFAULT,Typeface.BOLD)}
+        private var activeId=-1
+        override fun onDraw(c:Canvas){
+            val size=min(width,height).toFloat();val cx=width/2f;val cy=height/2f;val arm=size*.34f;val half=size*.48f;val r=arm*.24f
+            val v=RectF(cx-arm/2,cy-half,cx+arm/2,cy+half);val h=RectF(cx-half,cy-arm/2,cx+half,cy+arm/2)
+            c.drawRoundRect(v,r,r,base);c.drawRoundRect(h,r,r,base);c.drawRoundRect(v,r,r,outline);c.drawRoundRect(h,r,r,outline)
+            when(activeId){4->c.drawRoundRect(RectF(cx-arm/2,cy-half,cx+arm/2,cy),r,r,pressed);5->c.drawRoundRect(RectF(cx-arm/2,cy,cx+arm/2,cy+half),r,r,pressed);6->c.drawRoundRect(RectF(cx-half,cy-arm/2,cx,cy+arm/2),r,r,pressed);7->c.drawRoundRect(RectF(cx,cy-arm/2,cx+half,cy+arm/2),r,r,pressed)}
+            arrow.textSize=size*.15f;val fm=arrow.fontMetrics;val adj=-(fm.ascent+fm.descent)/2
+            c.drawText("▲",cx,cy-size*.29f+adj,arrow);c.drawText("▼",cx,cy+size*.29f+adj,arrow);c.drawText("◀",cx-size*.29f,cy+adj,arrow);c.drawText("▶",cx+size*.29f,cy+adj,arrow)
+        }
+        private fun idAt(x:Float,y:Float):Int{val dx=x-width/2f;val dy=y-height/2f;return if(kotlin.math.abs(dx)>kotlin.math.abs(dy)){if(dx<0)6 else 7}else{if(dy<0)4 else 5}}
+        override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE->{val id=idAt(e.x,e.y);if(id!=activeId){if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=id;NativeBridge.setButton(id,true);invalidate()}};MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{if(activeId>=0)NativeBridge.setButton(activeId,false);activeId=-1;invalidate()}};return true}
+    }
 
 
     private fun installPpssppAssets(root:File){
