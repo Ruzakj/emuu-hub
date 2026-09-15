@@ -1,0 +1,111 @@
+name: Fix PS2 Controller UI
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-ps2-controller-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Make PS2 overlay compact and customizable
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt')
+          s=p.read_text()
+          def once(old,new,label):
+              global s
+              if old not in s: raise SystemExit('pattern not found: '+label)
+              s=s.replace(old,new,1)
+
+          once('''    private var gameSpeedPercent = 100\n\n    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()''','''    private var gameSpeedPercent = 100
+    // Touch overlay is intentionally compact by default. Users can tune it from TUNE > Controller UI.
+    private var controllerScale = 0.72f
+    private var controllerOpacity = 0.62f
+
+    private fun controllerPrefs() = getSharedPreferences("ps2_controller_ui", MODE_PRIVATE)
+    private fun loadControllerUi() {
+        controllerScale = controllerPrefs().getFloat("scale", 0.72f).coerceIn(0.50f, 1.00f)
+        controllerOpacity = controllerPrefs().getFloat("opacity", 0.62f).coerceIn(0.20f, 1.00f)
+    }
+    private fun saveControllerUi(scale: Float, opacity: Float) {
+        controllerScale = scale.coerceIn(0.50f, 1.00f)
+        controllerOpacity = opacity.coerceIn(0.20f, 1.00f)
+        controllerPrefs().edit().putFloat("scale", controllerScale).putFloat("opacity", controllerOpacity).apply()
+    }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun cdp(v: Int) = dp((v * controllerScale).toInt().coerceAtLeast(1))''','controller state')
+
+          once('''        romPath = intent.getStringExtra("romPath").orEmpty()''','''        loadControllerUi()
+        romPath = intent.getStringExtra("romPath").orEmpty()''','load controller prefs')
+
+          once('''        if(pressed){setColor(Color.argb((alpha+55).coerceAtMost(235),46,92,128));setStroke(dp(2),Color.argb(225,184,226,255))}
+        else{setColor(Color.argb(alpha,19,22,27));setStroke(dp(1),Color.argb(118,255,255,255))}''','''        val a=(alpha*controllerOpacity).toInt().coerceIn(18,235)
+        if(pressed){setColor(Color.argb((a+45).coerceAtMost(235),46,92,128));setStroke(dp(2),Color.argb((225*controllerOpacity).toInt().coerceAtLeast(80),184,226,255))}
+        else{setColor(Color.argb(a,19,22,27));setStroke(dp(1),Color.argb((118*controllerOpacity).toInt().coerceAtLeast(45),255,255,255))}''','controller opacity')
+
+          once('''        root.addView(button, FrameLayout.LayoutParams(dp(w), dp(h), gravity).apply {
+            leftMargin = dp(left); topMargin = dp(top); rightMargin = dp(right); bottomMargin = dp(bottom)
+        })''','''        root.addView(button, FrameLayout.LayoutParams(cdp(w), cdp(h), gravity).apply {
+            leftMargin = cdp(left); topMargin = cdp(top); rightMargin = cdp(right); bottomMargin = cdp(bottom)
+        })''','scaled addControl')
+
+          marker='''        val profileButton = Button(this).apply {'''
+          insert='''        panel.addView(Button(this).apply {
+            text = "Controller UI • ${(controllerScale * 100).toInt()}% • opacity ${(controllerOpacity * 100).toInt()}%"
+            isAllCaps = false
+            setOnClickListener {
+                val box = LinearLayout(this@Ps2GameActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(10), dp(20), dp(10))
+                }
+                val sizeLabel = TextView(this@Ps2GameActivity).apply { text = "Ukuran controller: ${(controllerScale * 100).toInt()}%"; setTextColor(Color.WHITE) }
+                val sizeBar = SeekBar(this@Ps2GameActivity).apply { max = 50; progress = ((controllerScale * 100).toInt() - 50).coerceIn(0,50) }
+                sizeBar.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(b:SeekBar?,v:Int,from:Boolean){ sizeLabel.text="Ukuran controller: ${v+50}%" }
+                    override fun onStartTrackingTouch(b:SeekBar?){}
+                    override fun onStopTrackingTouch(b:SeekBar?){}
+                })
+                val alphaLabel = TextView(this@Ps2GameActivity).apply { text = "Transparansi: ${(controllerOpacity * 100).toInt()}%"; setTextColor(Color.WHITE); setPadding(0,dp(12),0,0) }
+                val alphaBar = SeekBar(this@Ps2GameActivity).apply { max = 80; progress = ((controllerOpacity * 100).toInt() - 20).coerceIn(0,80) }
+                alphaBar.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(b:SeekBar?,v:Int,from:Boolean){ alphaLabel.text="Transparansi: ${v+20}%" }
+                    override fun onStartTrackingTouch(b:SeekBar?){}
+                    override fun onStopTrackingTouch(b:SeekBar?){}
+                })
+                box.addView(sizeLabel); box.addView(sizeBar); box.addView(alphaLabel); box.addView(alphaBar)
+                AlertDialog.Builder(this@Ps2GameActivity)
+                    .setTitle("Controller UI")
+                    .setView(box)
+                    .setNeutralButton("RESET") { _,_ -> saveControllerUi(.72f,.62f); Toast.makeText(this@Ps2GameActivity,"Reset 72% / 62%. Berlaku saat game dibuka ulang.",Toast.LENGTH_LONG).show() }
+                    .setNegativeButton("BATAL",null)
+                    .setPositiveButton("SIMPAN") { _,_ ->
+                        saveControllerUi((sizeBar.progress+50)/100f,(alphaBar.progress+20)/100f)
+                        Toast.makeText(this@Ps2GameActivity,"Controller tersimpan. Buka ulang game untuk menerapkan layout.",Toast.LENGTH_LONG).show()
+                    }.show()
+            }
+        })
+
+        val profileButton = Button(this).apply {'''
+          once(marker,insert,'controller UI menu')
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/Ps2GameActivity.kt
+          git diff --cached --check
+          git commit -m "Fix PS2 overlay size and add controller UI controls" || exit 0
+          git push
