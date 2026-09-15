@@ -9,65 +9,55 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Fix Dolphin Enhanced full external launch'
+    if: github.event.head_commit.message == 'Fix Dolphin external routing patch workflow'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Force GC/Wii through Dolphin Enhanced MainActivity
+      - name: Patch Dolphin launcher
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-
           p = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
           s = p.read_text()
-
-          # GC/Wii must use Dolphin Enhanced itself, not Emu Hub's GameActivity/runtime.
           start = s.index('    private fun launchDolphinExternal(uri:Uri,name:String){')
           end = s.index('\n    private fun launchEden(uri:Uri){', start)
-          new = '''    private fun launchDolphinExternal(uri:Uri,name:String){
-        // Dolphin Enhanced/MMJ owns the complete emulation UI, controller chooser,
-        // joystick/sensor emulation and in-game menu. Emu Hub only launches the ROM.
-        val pkg = "org.mm.j"
-        val activity = "org.dolphinemu.dolphinemu.ui.main.MainActivity"
-
-        if (packageManager.getLaunchIntentForPackage(pkg) == null) {
-            Toast.makeText(this,"Dolphin Enhanced (org.mm.j) tidak terpasang. Install Dolphin Enhanced untuk GC/Wii.",Toast.LENGTH_LONG).show()
-            return
-        }
-
-        val directPath = directGameFile(uri)?.absolutePath
-        if (directPath == null) {
-            Toast.makeText(this,"Dolphin Enhanced MMJ membutuhkan path ROM yang bisa dibaca langsung. Tambahkan game dari storage lokal.",Toast.LENGTH_LONG).show()
-            return
-        }
-
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setClassName(pkg, activity)
-            putExtra("AutoStartFile", directPath)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
-        try {
-            startActivity(intent)
-            status.text="GameCube/Wii • Dolphin Enhanced • full controller menu"
-        } catch (e: Exception) {
-            Toast.makeText(this,"Gagal membuka ROM lewat Dolphin Enhanced: ${e.message}",Toast.LENGTH_LONG).show()
-            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }
-        }
-    }
-'''
-          s = s[:start] + new + s[end:]
-          p.write_text(s)
+          lines = [
+              '    private fun launchDolphinExternal(uri:Uri,name:String){',
+              '        val pkg = "org.mm.j"',
+              '        val activity = "org.dolphinemu.dolphinemu.ui.main.MainActivity"',
+              '        if (packageManager.getLaunchIntentForPackage(pkg) == null) {',
+              '            Toast.makeText(this,"Dolphin Enhanced (org.mm.j) tidak terpasang.",Toast.LENGTH_LONG).show()',
+              '            return',
+              '        }',
+              '        val directPath = directGameFile(uri)?.absolutePath',
+              '        if (directPath == null) {',
+              '            Toast.makeText(this,"ROM harus berasal dari storage lokal agar Dolphin Enhanced dapat membukanya langsung.",Toast.LENGTH_LONG).show()',
+              '            return',
+              '        }',
+              '        val intent = Intent(Intent.ACTION_VIEW).apply {',
+              '            setClassName(pkg,activity)',
+              '            putExtra("AutoStartFile",directPath)',
+              '            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)',
+              '        }',
+              '        try {',
+              '            startActivity(intent)',
+              '            status.text="GameCube/Wii • Dolphin Enhanced • full UI"',
+              '        } catch (_:Exception) {',
+              '            Toast.makeText(this,"Direct boot Dolphin Enhanced gagal.",Toast.LENGTH_LONG).show()',
+              '            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }',
+              '        }',
+              '    }',
+              ''
+          ]
+          p.write_text(s[:start] + '\n'.join(lines) + s[end:])
           PY
-
-      - name: Commit external-launch fix
+      - name: Commit source fix
         shell: bash
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/src/main/java/com/ric/emuhub/MainActivity.kt
           git diff --cached --quiet && exit 0
-          git commit -m "Route GC Wii through full Dolphin Enhanced UI"
+          git commit -m "Route GC Wii through Dolphin Enhanced full UI"
           git push
