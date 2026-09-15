@@ -697,49 +697,29 @@ class MainActivity : Activity() {
 
 
     private fun launchDolphinExternal(uri:Uri,name:String){
-        val pkg=DOLPHIN_PACKAGES.firstOrNull{packageManager.getLaunchIntentForPackage(it)!=null}?:run{
-            Toast.makeText(this,"Emulator GameCube/Wii eksternal tidak terdeteksi. Install Dolphin atau fork yang kompatibel.",Toast.LENGTH_LONG).show();return
-        }
-        val directPath=directGameFile(uri)?.absolutePath
-        val uriValue=uri.toString()
-        val pathValue=directPath?:uriValue
-        val activity="org.dolphinemu.dolphinemu.ui.main.MainActivity"
-
-        // Dolphin official uses ACTION_MAIN + AutoStartFile URI. Several forks use ACTION_VIEW;
-        // path-based forks require a filesystem path instead of content:// URI.
-        val official = pkg=="org.dolphinemu.dolphinemu" || pkg=="org.dolphinemu.dolphinemu.dev"
-        val pathFork = pkg in setOf("org.mm.jr","org.mm.j","org.dolphin.ishiirukadark")
-        val primary=Intent(if(official) Intent.ACTION_MAIN else Intent.ACTION_VIEW).apply{
-            setClassName(pkg,activity)
-            putExtra("AutoStartFile",if(pathFork) pathValue else uriValue)
-            putExtra("romPath",pathValue)
-            putExtra("romName",name)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)
-        }
-        if(official) primary.addCategory(Intent.CATEGORY_LAUNCHER)
-
-        try{
-            startActivity(primary)
-            status.text="GameCube/Wii • direct boot • ${pkg.substringAfterLast('.')}"
+        val pkg = "org.mm.j"
+        val activity = "org.dolphinemu.dolphinemu.ui.main.MainActivity"
+        if (packageManager.getLaunchIntentForPackage(pkg) == null) {
+            Toast.makeText(this,"Dolphin Enhanced (org.mm.j) tidak terpasang.",Toast.LENGTH_LONG).show()
             return
-        }catch(_:Exception){}
-
-        // Compatibility fallback: same explicit MainActivity, alternate action/value form.
-        val fallback=Intent(if(official) Intent.ACTION_VIEW else Intent.ACTION_MAIN).apply{
-            setClassName(pkg,activity)
-            putExtra("AutoStartFile",pathValue)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            clipData=ClipData.newRawUri("GameCube/Wii ROM",uri)
         }
-        try{
-            startActivity(fallback)
-            status.text="GameCube/Wii • compatibility direct boot"
+        val directPath = directGameFile(uri)?.absolutePath
+        if (directPath == null) {
+            Toast.makeText(this,"ROM harus berasal dari storage lokal agar Dolphin Enhanced dapat membukanya langsung.",Toast.LENGTH_LONG).show()
             return
-        }catch(_:Exception){}
-
-        Toast.makeText(this,"Dolphin terdeteksi, tapi direct boot ROM ditolak oleh versi ini.",Toast.LENGTH_LONG).show()
-        packageManager.getLaunchIntentForPackage(pkg)?.let{runCatching{startActivity(it)}}
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setClassName(pkg,activity)
+            putExtra("AutoStartFile",directPath)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        try {
+            startActivity(intent)
+            status.text="GameCube/Wii • Dolphin Enhanced • full UI"
+        } catch (_:Exception) {
+            Toast.makeText(this,"Direct boot Dolphin Enhanced gagal.",Toast.LENGTH_LONG).show()
+            packageManager.getLaunchIntentForPackage(pkg)?.let { startActivity(it) }
+        }
     }
 
     private fun launchEden(uri:Uri){
