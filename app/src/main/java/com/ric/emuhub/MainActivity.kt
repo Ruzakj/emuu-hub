@@ -53,7 +53,7 @@ class MainActivity : Activity() {
         private val ARCHIVES = ArchiveHelper.ARCHIVE_EXTENSIONS
         private val RECOGNIZED = INTERNAL + SWITCH + GC_WII + ARCHIVES
         private val EDEN_PACKAGES = listOf("com.miHoYo.Yuanshen","com.miHoYo.Yunashen","com.miHoYo.Yuanshen.nightly","dev.eden.eden_emulator","dev.eden.eden_nightly")
-        private val DOLPHIN_PACKAGES = listOf("org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.mmjr","org.dolphinemu.mmjr2","org.dolphinemu.mmjr3","org.mm.jr","org.mm.j","org.dolphinemu.handheld","org.dolphin.ishiirukadark")
+        private val DOLPHIN_PACKAGES = listOf("org.mm.j","org.mm.jr","org.dolphinemu.mmjr","org.dolphinemu.mmjr2","org.dolphinemu.mmjr3","org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.handheld","org.dolphin.ishiirukadark")
         private val PSP_RES_VALUES = arrayOf("480x272","960x544")
         private val PSP_RES_LABELS = arrayOf("1× • 480×272 • Performance","2× • 960×544 • Recommended")
     }

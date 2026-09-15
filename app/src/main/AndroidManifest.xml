@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <queries>
-        <package android:name="dev.eden.eden_emulator" /><package android:name="dev.eden.eden_nightly" /><package android:name="org.dolphinemu.dolphinemu" /><package android:name="org.dolphinemu.dolphinemu.dev" /><package android:name="org.dolphinemu.mmjr" /><package android:name="org.dolphinemu.mmjr2" /><package android:name="com.miHoYo.Yuanshen" /><package android:name="com.miHoYo.Yunashen" /><package android:name="com.miHoYo.Yuanshen.nightly" />
+        <package android:name="dev.eden.eden_emulator" /><package android:name="dev.eden.eden_nightly" /><package android:name="org.dolphinemu.dolphinemu" /><package android:name="org.dolphinemu.dolphinemu.dev" /><package android:name="org.dolphinemu.mmjr" /><package android:name="org.dolphinemu.mmjr2" /><package android:name="org.mm.j" /><package android:name="org.mm.jr" /><package android:name="com.miHoYo.Yuanshen" /><package android:name="com.miHoYo.Yunashen" /><package android:name="com.miHoYo.Yuanshen.nightly" />
         <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/octet-stream"/></intent>
     </queries>
     <application android:name=".EmuHubApp" android:theme="@style/Theme.EmuHub" android:label="Emu Hub" android:allowBackup="true" android:extractNativeLibs="true" android:icon="@drawable/ic_launcher" android:roundIcon="@drawable/ic_launcher">
