@@ -1,0 +1,47 @@
+name: Prefer Dolphin Enhanced MMJ
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Route GC/Wii directly to Dolphin Enhanced MMJ'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prefer Dolphin Enhanced package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('app/src/main/java/com/ric/emuhub/MainActivity.kt')
+          s = p.read_text()
+          old = 'private val DOLPHIN_PACKAGES = listOf("org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.mmjr","org.dolphinemu.mmjr2","org.dolphinemu.mmjr3","org.mm.jr","org.mm.j","org.dolphinemu.handheld","org.dolphin.ishiirukadark")'
+          new = 'private val DOLPHIN_PACKAGES = listOf("org.mm.j","org.mm.jr","org.dolphinemu.mmjr","org.dolphinemu.mmjr2","org.dolphinemu.mmjr3","org.dolphinemu.dolphinemu","org.dolphinemu.dolphinemu.dev","org.dolphinemu.handheld","org.dolphin.ishiirukadark")'
+          if old not in s:
+              raise SystemExit('DOLPHIN_PACKAGES target not found')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          needle = '<package android:name="org.dolphinemu.mmjr2" />'
+          if '<package android:name="org.mm.j" />' not in s:
+              if needle not in s:
+                  raise SystemExit('manifest Dolphin query target not found')
+              s = s.replace(needle, needle + '<package android:name="org.mm.j" /><package android:name="org.mm.jr" />', 1)
+              p.write_text(s)
+          PY
+      - name: Commit routing update
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/com/ric/emuhub/MainActivity.kt app/src/main/AndroidManifest.xml
+          git diff --cached --quiet && exit 0
+          git commit -m "Prefer Dolphin Enhanced MMJ package for GC/Wii"
+          git push
