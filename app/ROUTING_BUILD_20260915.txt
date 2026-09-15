@@ -1,0 +1,3 @@
+Dolphin Enhanced external routing validation build.
+Target package: org.mm.j
+Purpose: validate Wii external session/controller behavior from current main source.
