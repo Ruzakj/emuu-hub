@@ -91,6 +91,12 @@ object ArchiveHelper {
 
     private fun romExt(name: String) = name.substringAfterLast('.', "").lowercase(Locale.US)
 
+    private fun ensureEntryFits(size: Long, total: Long) {
+        if (size >= 0L && (size > MAX_TOTAL_BYTES || total > MAX_TOTAL_BYTES - size)) {
+            error("Archive terlalu besar")
+        }
+    }
+
     private fun copyLimited(input: InputStream, target: File, total: LongArray) {
         target.parentFile?.mkdirs()
         val buffer = ByteArray(1024 * 1024)
@@ -117,6 +123,7 @@ object ArchiveHelper {
                 if (entry.isDirectory) continue
                 val ext = romExt(entry.name)
                 if (ext !in ROM_EXTENSIONS) continue
+                ensureEntryFits(entry.size, total[0])
                 val target = safeTarget(root, entry.name) ?: continue
                 zip.getInputStream(entry).buffered().use { copyLimited(it, target, total) }
                 result += ExtractedRom(target, target.name, ext)
@@ -137,6 +144,7 @@ object ArchiveHelper {
                 if (entry.isDirectory) continue
                 val ext = romExt(entry.name)
                 if (ext !in ROM_EXTENSIONS) continue
+                ensureEntryFits(entry.size, total[0])
                 val target = safeTarget(root, entry.name) ?: continue
                 target.parentFile?.mkdirs()
                 val buffer = ByteArray(1024 * 1024)
@@ -167,6 +175,7 @@ object ArchiveHelper {
                 val entryName = entry.fileNameW.takeIf { it.isNotBlank() } ?: entry.fileNameString
                 val ext = romExt(entryName)
                 if (ext !in ROM_EXTENSIONS) continue
+                ensureEntryFits(entry.fullUnpackSize, total[0])
                 val target = safeTarget(root, entryName) ?: continue
                 target.parentFile?.mkdirs()
                 FileOutputStream(target).buffered().use { output ->
@@ -199,6 +208,7 @@ object ArchiveHelper {
                 if (entry.isDirectory) continue
                 val ext = romExt(entry.name)
                 if (ext !in ROM_EXTENSIONS) continue
+                ensureEntryFits(entry.size, total[0])
                 val target = safeTarget(root, entry.name) ?: continue
                 copyLimited(tar, target, total)
                 result += ExtractedRom(target, target.name, ext)
