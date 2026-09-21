@@ -17,9 +17,12 @@ object BuiltinRomManager {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
         if (!marker.isFile) {
-            targetRoot.mkdirs()
-            copyAssetTree(context, ASSET_ROOT, targetRoot)
-            marker.writeText("1")
+            val installed = runCatching {
+                targetRoot.mkdirs()
+                copyAssetTree(context, ASSET_ROOT, targetRoot)
+                marker.writeText("1")
+            }.isSuccess
+            if (!installed) return
         }
         mergeIntoLibraryCache(context, targetRoot)
     }
@@ -38,6 +41,7 @@ object BuiltinRomManager {
     }
 
     private fun mergeIntoLibraryCache(context: Context, root: File) {
+        if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val existing = runCatching { JSONArray(prefs.getString(CACHE_KEY, "[]")) }.getOrElse { JSONArray() }
         val byUri = LinkedHashMap<String, JSONObject>()
@@ -59,6 +63,6 @@ object BuiltinRomManager {
 
         val merged = JSONArray()
         byUri.values.forEach { merged.put(it) }
-        prefs.edit().putString(CACHE_KEY, merged.toString()).commit()
+        prefs.edit().putString(CACHE_KEY, merged.toString()).apply()
     }
 }
