@@ -1,6 +1,5 @@
 package com.ric.emuhub
 
-import android.app.DownloadManager
 import android.content.Context
 import java.io.File
 
@@ -28,13 +27,18 @@ object StorageMaintenance {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val previousVersion = prefs.getInt(LAST_VERSION, -1)
         val currentVersion = BuildConfig.VERSION_CODE
-        val updates = File(context.getExternalFilesDir(null), "updates")
-        if (updates.isDirectory) {
-            val now = System.currentTimeMillis()
-            updates.listFiles()?.forEach { file ->
-                // Package replacement makes old installers obsolete; same-version retries keep only recent files.
-                if (previousVersion != currentVersion || now - file.lastModified() > MAX_FAILED_UPDATE_AGE_MS) {
-                    file.deleteRecursively()
+
+        // External app storage can be unavailable while the device is locked, unmounted, or on unusual OEM builds.
+        // In that case skip update cleanup instead of accidentally resolving the path relative to a null parent.
+        context.getExternalFilesDir(null)?.let { externalFilesDir ->
+            val updates = File(externalFilesDir, "updates")
+            if (updates.isDirectory) {
+                val now = System.currentTimeMillis()
+                updates.listFiles()?.forEach { file ->
+                    // Package replacement makes old installers obsolete; same-version retries keep only recent files.
+                    if (previousVersion != currentVersion || now - file.lastModified() > MAX_FAILED_UPDATE_AGE_MS) {
+                        file.deleteRecursively()
+                    }
                 }
             }
         }
