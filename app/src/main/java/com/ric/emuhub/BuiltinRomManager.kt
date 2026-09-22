@@ -43,7 +43,8 @@ object BuiltinRomManager {
     private fun mergeIntoLibraryCache(context: Context, root: File) {
         if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val existing = runCatching { JSONArray(prefs.getString(CACHE_KEY, "[]")) }.getOrElse { JSONArray() }
+        val cachedJson = prefs.getString(CACHE_KEY, "[]") ?: "[]"
+        val existing = runCatching { JSONArray(cachedJson) }.getOrElse { JSONArray() }
         val byUri = LinkedHashMap<String, JSONObject>()
         val rootPath = runCatching { root.canonicalPath }
             .getOrElse { root.absolutePath } + File.separator
@@ -81,6 +82,9 @@ object BuiltinRomManager {
 
         val merged = JSONArray()
         byUri.values.forEach { merged.put(it) }
-        prefs.edit().putString(CACHE_KEY, merged.toString()).apply()
+        val mergedJson = merged.toString()
+        if (mergedJson != cachedJson) {
+            prefs.edit().putString(CACHE_KEY, mergedJson).apply()
+        }
     }
 }
