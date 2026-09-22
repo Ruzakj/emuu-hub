@@ -63,7 +63,13 @@ object BuiltinRomManager {
             byUri[uri] = item
         }
 
-        root.walkTopDown().filter { it.isFile && it.extension.lowercase() in supported }.forEach { file ->
+        val builtInRoms = root.walkTopDown()
+            .filter { it.isFile && it.extension.lowercase() in supported }
+            .toList()
+            .sortedBy { file ->
+                file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase() ?: file.name.lowercase()
+            }
+        builtInRoms.forEach { file ->
             val uri = Uri.fromFile(file).toString()
             val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
             byUri[uri] = JSONObject()
