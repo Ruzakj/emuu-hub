@@ -61,6 +61,9 @@ object StorageMaintenance {
                 }
             }
         }
+
+        // Mark maintenance complete only after every cleanup stage finishes successfully. If an unexpected
+        // filesystem failure escapes above, the next invocation can retry instead of being throttled for an hour.
         prefs.edit()
             .putInt(LAST_VERSION, currentVersion)
             .putLong(LAST_RUN, now)
