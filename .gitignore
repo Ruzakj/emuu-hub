@@ -30,3 +30,8 @@ Thumbs.db
 # Local logs and temporary files
 *.log
 *.tmp
+
+# Transient CI/build trigger markers
+.build-trigger-*
+.github/*build-trigger*.txt
+app/*BUILD_*.txt
