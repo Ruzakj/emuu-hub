@@ -11,6 +11,8 @@ import java.io.File
 /** Central storage layout for every internal emulator. */
 object StoragePaths {
     private const val ROOT_NAME = "emu-hub"
+    private const val MIGRATION_PREFS = "storage_paths"
+    private const val LEGACY_MIGRATION_KEY = "legacy_migration_v1_complete"
 
     fun hasSharedRootAccess(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
@@ -55,13 +57,24 @@ object StoragePaths {
         File(ps2, "memcards").mkdirs()
         File(ps2, "savestates").mkdirs()
 
-        // Preserve data created by older Emu Hub builds before shared storage was introduced.
-        migrateTree(File(context.filesDir, "system"), system)
-        migrateTree(File(context.filesDir, "saves"), saves)
-        File(context.filesDir, "saves").listFiles()?.filter { it.isFile && it.name.endsWith(".state", true) }?.forEach { old ->
-            runCatching { if (!File(states, old.name).exists()) old.copyTo(File(states, old.name), overwrite = false) }
+        // Migrate data created by older Emu Hub builds once. Re-scanning the legacy tree on every
+        // directory lookup adds avoidable storage I/O, especially for large save/PS2 folders.
+        val migrationPrefs = context.getSharedPreferences(MIGRATION_PREFS, Context.MODE_PRIVATE)
+        if (!migrationPrefs.getBoolean(LEGACY_MIGRATION_KEY, false)) {
+            migrateTree(File(context.filesDir, "system"), system)
+            migrateTree(File(context.filesDir, "saves"), saves)
+            File(context.filesDir, "saves").listFiles()
+                ?.filter { it.isFile && it.name.endsWith(".state", true) }
+                ?.forEach { old ->
+                    runCatching {
+                        if (!File(states, old.name).exists()) {
+                            old.copyTo(File(states, old.name), overwrite = false)
+                        }
+                    }
+                }
+            migrateTree(File(context.filesDir, "ps2"), ps2)
+            migrationPrefs.edit().putBoolean(LEGACY_MIGRATION_KEY, true).apply()
         }
-        migrateTree(File(context.filesDir, "ps2"), ps2)
         return root
     }
 
