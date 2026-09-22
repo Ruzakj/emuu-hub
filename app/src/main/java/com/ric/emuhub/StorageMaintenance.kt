@@ -54,12 +54,14 @@ object StorageMaintenance {
         if (previousVersion == currentVersion && now - lastRun in 0 until MIN_RUN_INTERVAL_MS) return
 
         ArchiveHelper.cleanupStale(context.cacheDir)
-        File(context.cacheDir, "ps2roms").deleteRecursively()
+        deleteRecursivelyBestEffort(File(context.cacheDir, "ps2roms"), "PS2 ROM cache")
 
         // Engine installation is transactional. Only incomplete/old staging directories are disposable.
         val engineRoot = File(context.filesDir, "engine_packs")
         engineRoot.listFiles()?.forEach { file ->
-            if (file.name.startsWith("incoming-") || file.name == "previous") file.deleteRecursively()
+            if (file.name.startsWith("incoming-") || file.name == "previous") {
+                deleteRecursivelyBestEffort(file, "engine staging ${file.name}")
+            }
         }
 
         // External app storage can be unavailable while the device is locked, unmounted, or on unusual OEM builds.
@@ -70,7 +72,7 @@ object StorageMaintenance {
                 updates.listFiles()?.forEach { file ->
                     // Package replacement makes old installers obsolete; same-version retries keep only recent files.
                     if (previousVersion != currentVersion || now - file.lastModified() > MAX_FAILED_UPDATE_AGE_MS) {
-                        file.deleteRecursively()
+                        deleteRecursivelyBestEffort(file, "update artifact ${file.name}")
                     }
                 }
             }
@@ -84,6 +86,12 @@ object StorageMaintenance {
                 .commit()
         ) {
             Log.w(TAG, "Unable to persist storage maintenance completion")
+        }
+    }
+
+    private fun deleteRecursivelyBestEffort(file: File, label: String) {
+        if (file.exists() && !file.deleteRecursively()) {
+            Log.w(TAG, "Unable to delete $label at ${file.absolutePath}")
         }
     }
 }
