@@ -1,11 +1,13 @@
 package com.ric.emuhub
 
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Conservative cleanup for disposable runtime/update artifacts only. Never touches ROMs, saves or settings. */
 object StorageMaintenance {
+    private const val TAG = "StorageMaintenance"
     private const val PREFS = "storage_maintenance"
     private const val LAST_VERSION = "last_version"
     private const val LAST_RUN = "last_run"
@@ -19,6 +21,7 @@ object StorageMaintenance {
         Thread({
             try {
                 runCatching { run(app) }
+                    .onFailure { error -> Log.w(TAG, "Background storage maintenance failed", error) }
             } finally {
                 running.set(false)
             }
