@@ -2,16 +2,25 @@ package com.ric.emuhub
 
 import android.content.Context
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Conservative cleanup for disposable runtime/update artifacts only. Never touches ROMs, saves or settings. */
 object StorageMaintenance {
     private const val PREFS = "storage_maintenance"
     private const val LAST_VERSION = "last_version"
     private const val MAX_FAILED_UPDATE_AGE_MS = 24L * 60L * 60L * 1000L
+    private val running = AtomicBoolean(false)
 
     fun runAsync(context: Context) {
+        if (!running.compareAndSet(false, true)) return
         val app = context.applicationContext
-        Thread({ runCatching { run(app) } }, "emuhub-storage-maintenance").start()
+        Thread({
+            try {
+                runCatching { run(app) }
+            } finally {
+                running.set(false)
+            }
+        }, "emuhub-storage-maintenance").start()
     }
 
     private fun run(context: Context) {
