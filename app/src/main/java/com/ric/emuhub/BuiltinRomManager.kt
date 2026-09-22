@@ -54,9 +54,9 @@ object BuiltinRomManager {
 
             val parsed = runCatching { Uri.parse(uri) }.getOrNull()
             val cachedFile = if (parsed?.scheme == "file") parsed.path?.let(::File) else null
-            val isBuiltIn = cachedFile?.let {
-                runCatching { it.canonicalPath.startsWith(rootPath) }
-                    .getOrElse { it.absolutePath.startsWith(rootPath) }
+            val isBuiltIn = cachedFile?.let { file ->
+                runCatching { file.canonicalPath.startsWith(rootPath) }
+                    .getOrElse { file.absolutePath.startsWith(rootPath) }
             } == true
             if (isBuiltIn && cachedFile?.isFile != true) continue
 
