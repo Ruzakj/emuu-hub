@@ -18,14 +18,23 @@ object StorageMaintenance {
     fun runAsync(context: Context) {
         if (!running.compareAndSet(false, true)) return
         val app = context.applicationContext
-        Thread({
+        val worker = Thread({
             try {
                 runCatching { run(app) }
                     .onFailure { error -> Log.w(TAG, "Background storage maintenance failed", error) }
             } finally {
                 running.set(false)
             }
-        }, "emuhub-storage-maintenance").start()
+        }, "emuhub-storage-maintenance")
+
+        // Thread creation/start can fail under severe resource pressure. Release the guard so a later invocation
+        // can retry instead of leaving storage maintenance permanently disabled for the rest of the process.
+        try {
+            worker.start()
+        } catch (error: Throwable) {
+            running.set(false)
+            Log.w(TAG, "Unable to start storage maintenance worker", error)
+        }
     }
 
     private fun run(context: Context) {
