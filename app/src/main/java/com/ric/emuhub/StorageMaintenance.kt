@@ -21,9 +21,10 @@ object StorageMaintenance {
         val app = context.applicationContext
         val worker = Thread({
             try {
-                // Filesystem cleanup is not latency-sensitive. Keep it behind UI, audio and emulator work so a
-                // maintenance scan cannot compete with startup or active gameplay on constrained devices.
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                // Filesystem cleanup is not latency-sensitive. Prefer background priority, but do not skip
+                // maintenance if an unusual device/runtime rejects the priority change.
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+                    .onFailure { error -> Log.w(TAG, "Unable to lower storage maintenance priority", error) }
                 runCatching { run(app) }
                     .onFailure { error -> Log.w(TAG, "Background storage maintenance failed", error) }
             } finally {
