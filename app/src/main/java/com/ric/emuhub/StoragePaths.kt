@@ -57,23 +57,25 @@ object StoragePaths {
         File(ps2, "memcards").mkdirs()
         File(ps2, "savestates").mkdirs()
 
-        // Migrate data created by older Emu Hub builds once. Re-scanning the legacy tree on every
-        // directory lookup adds avoidable storage I/O, especially for large save/PS2 folders.
+        // Migrate data created by older Emu Hub builds once. Only persist completion after every
+        // copy succeeds so a transient storage failure can be retried on the next directory lookup.
         val migrationPrefs = context.getSharedPreferences(MIGRATION_PREFS, Context.MODE_PRIVATE)
         if (!migrationPrefs.getBoolean(LEGACY_MIGRATION_KEY, false)) {
-            migrateTree(File(context.filesDir, "system"), system)
-            migrateTree(File(context.filesDir, "saves"), saves)
+            var migrationSucceeded = migrateTree(File(context.filesDir, "system"), system)
+            migrationSucceeded = migrateTree(File(context.filesDir, "saves"), saves) && migrationSucceeded
             File(context.filesDir, "saves").listFiles()
                 ?.filter { it.isFile && it.name.endsWith(".state", true) }
                 ?.forEach { old ->
-                    runCatching {
-                        if (!File(states, old.name).exists()) {
-                            old.copyTo(File(states, old.name), overwrite = false)
-                        }
-                    }
+                    val copied = runCatching {
+                        val destination = File(states, old.name)
+                        if (!destination.exists()) old.copyTo(destination, overwrite = false)
+                    }.isSuccess
+                    migrationSucceeded = copied && migrationSucceeded
                 }
-            migrateTree(File(context.filesDir, "ps2"), ps2)
-            migrationPrefs.edit().putBoolean(LEGACY_MIGRATION_KEY, true).apply()
+            migrationSucceeded = migrateTree(File(context.filesDir, "ps2"), ps2) && migrationSucceeded
+            if (migrationSucceeded) {
+                migrationPrefs.edit().putBoolean(LEGACY_MIGRATION_KEY, true).apply()
+            }
         }
         return root
     }
@@ -84,18 +86,21 @@ object StoragePaths {
     fun ps2Root(context: Context): File = File(ensureLayout(context), "PS2").apply { mkdirs() }
     fun ps2BiosDir(context: Context): File = File(ensureLayout(context), "PS2/bios").apply { mkdirs() }
 
-    private fun migrateTree(source: File, target: File) {
-        if (!source.exists() || source.absolutePath == target.absolutePath) return
+    private fun migrateTree(source: File, target: File): Boolean {
+        if (!source.exists() || source.absolutePath == target.absolutePath) return true
+        var succeeded = true
         source.listFiles()?.forEach { old ->
             val out = File(target, old.name)
-            runCatching {
+            val copied = runCatching {
                 if (old.isDirectory) {
-                    out.mkdirs()
-                    migrateTree(old, out)
+                    if (!out.exists() && !out.mkdirs()) error("Unable to create ${out.absolutePath}")
+                    if (!migrateTree(old, out)) error("Unable to migrate ${old.absolutePath}")
                 } else if (!out.exists() || out.length() == 0L) {
                     old.copyTo(out, overwrite = true)
                 }
-            }
+            }.isSuccess
+            succeeded = copied && succeeded
         }
+        return succeeded
     }
 }
