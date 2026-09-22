@@ -88,8 +88,9 @@ object StoragePaths {
 
     private fun migrateTree(source: File, target: File): Boolean {
         if (!source.exists() || source.absolutePath == target.absolutePath) return true
+        val children = source.listFiles() ?: return !source.isDirectory
         var succeeded = true
-        source.listFiles()?.forEach { old ->
+        children.forEach { old ->
             val out = File(target, old.name)
             val copied = runCatching {
                 if (old.isDirectory) {
