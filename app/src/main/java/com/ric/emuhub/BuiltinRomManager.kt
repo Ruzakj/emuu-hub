@@ -45,7 +45,8 @@ object BuiltinRomManager {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val existing = runCatching { JSONArray(prefs.getString(CACHE_KEY, "[]")) }.getOrElse { JSONArray() }
         val byUri = LinkedHashMap<String, JSONObject>()
-        val rootPath = root.canonicalFile.path + File.separator
+        val rootPath = runCatching { root.canonicalFile.path }
+            .getOrElse { root.absoluteFile.path } + File.separator
         for (i in 0 until existing.length()) {
             val item = existing.optJSONObject(i) ?: continue
             val uri = item.optString("u")
@@ -54,7 +55,8 @@ object BuiltinRomManager {
             val parsed = runCatching { Uri.parse(uri) }.getOrNull()
             val cachedFile = if (parsed?.scheme == "file") parsed.path?.let(::File) else null
             val isBuiltIn = cachedFile?.let {
-                runCatching { it.canonicalFile.path.startsWith(rootPath) }.getOrDefault(false)
+                runCatching { it.canonicalFile.path.startsWith(rootPath) }
+                    .getOrElse { it.absoluteFile.path.startsWith(rootPath) }
             } == true
             if (isBuiltIn && cachedFile?.isFile != true) continue
 
