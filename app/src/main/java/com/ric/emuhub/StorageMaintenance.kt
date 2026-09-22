@@ -62,11 +62,14 @@ object StorageMaintenance {
             }
         }
 
-        // Mark maintenance complete only after every cleanup stage finishes successfully. If an unexpected
-        // filesystem failure escapes above, the next invocation can retry instead of being throttled for an hour.
-        prefs.edit()
-            .putInt(LAST_VERSION, currentVersion)
-            .putLong(LAST_RUN, now)
-            .apply()
+        // This runs on our maintenance worker, so synchronously persist completion before the worker exits.
+        // That keeps rapid process restarts from losing the throttle marker and repeating the same filesystem scan.
+        if (!prefs.edit()
+                .putInt(LAST_VERSION, currentVersion)
+                .putLong(LAST_RUN, now)
+                .commit()
+        ) {
+            Log.w(TAG, "Unable to persist storage maintenance completion")
+        }
     }
 }
