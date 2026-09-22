@@ -1,6 +1,7 @@
 package com.ric.emuhub
 
 import android.content.Context
+import android.os.Process
 import android.util.Log
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,6 +21,9 @@ object StorageMaintenance {
         val app = context.applicationContext
         val worker = Thread({
             try {
+                // Filesystem cleanup is not latency-sensitive. Keep it behind UI, audio and emulator work so a
+                // maintenance scan cannot compete with startup or active gameplay on constrained devices.
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
                 runCatching { run(app) }
                     .onFailure { error -> Log.w(TAG, "Background storage maintenance failed", error) }
             } finally {
