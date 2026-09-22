@@ -90,8 +90,13 @@ object StorageMaintenance {
     }
 
     private fun deleteRecursivelyBestEffort(file: File, label: String) {
-        if (file.exists() && !file.deleteRecursively()) {
-            Log.w(TAG, "Unable to delete $label at ${file.absolutePath}")
-        }
+        if (!file.exists()) return
+        runCatching { file.deleteRecursively() }
+            .onSuccess { deleted ->
+                if (!deleted) Log.w(TAG, "Unable to delete $label at ${file.absolutePath}")
+            }
+            .onFailure { error ->
+                Log.w(TAG, "Unable to delete $label at ${file.absolutePath}", error)
+            }
     }
 }
