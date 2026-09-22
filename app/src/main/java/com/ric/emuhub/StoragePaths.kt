@@ -18,8 +18,21 @@ object StoragePaths {
     fun needsSharedRootPermission(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()
 
-    fun permissionIntent(context: Context): Intent =
-        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+    /**
+     * Prefer the app-specific all-files settings page, but keep a general settings fallback for
+     * Android builds/OEMs that do not expose the package-scoped activity.
+     */
+    fun permissionIntent(context: Context): Intent {
+        val appIntent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        )
+        return if (appIntent.resolveActivity(context.packageManager) != null) {
+            appIntent
+        } else {
+            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+        }
+    }
 
     fun root(context: Context): File {
         val base = if (hasSharedRootAccess()) {
