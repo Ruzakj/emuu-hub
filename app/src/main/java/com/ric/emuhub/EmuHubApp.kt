@@ -36,7 +36,12 @@ class EmuHubApp : Application() {
         if (isMainProcess) {
             runCatching { BuiltinRomManager.install(this) }
             EnginePackManager.bootstrapAsync(this)
-            Thread({ runCatching { StoragePaths.ensureLayout(applicationContext) } }, "emuhub-storage-init").start()
+            val storageInit = Thread({
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+                runCatching { StoragePaths.ensureLayout(applicationContext) }
+            }, "emuhub-storage-init")
+            storageInit.isDaemon = true
+            storageInit.start()
             StorageMaintenance.runAsync(this)
         } else if (!isPs2Process) {
             Thread({ runCatching { File(cacheDir, "ps2roms").deleteRecursively() } }, "emuhub-cache-clean").start()
@@ -78,29 +83,13 @@ class EmuHubApp : Application() {
         val isJ2meProcess = currentProcessName().endsWith(":j2me")
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
-                val trace = getSharedPreferences("j2me_runtime_trace", MODE_PRIVATE)
-                if (trace.getBoolean("active", false) || isJ2meProcess) {
-                    val stage = trace.getString("stage", "runtime") ?: "runtime"
-                    val game = trace.getString("game", "unknown") ?: "unknown"
-                    val sw = StringWriter(); error.printStackTrace(PrintWriter(sw))
-                    j2meLogFile().writeText(buildString {
-                        appendLine("EMU HUB J2ME CRASH")
-                        appendLine("time=${System.currentTimeMillis()}")
-                        appendLine("game=$game")
-                        appendLine("stage=$stage")
-                        appendLine("process=${currentProcessName()}")
-                        appendLine("thread=${thread.name}")
-                        appendLine("exception=${error.javaClass.name}: ${error.message}")
-                        appendLine()
-                        append(sw.toString())
-                    })
-                    trace.edit().putString("last_crash_stage", stage).putString("last_crash_game", game).putLong("last_crash_time", System.currentTimeMillis()).putBoolean("active", false).commit()
+                val sw = StringWriter()
+                error.printStackTrace(PrintWriter(sw))
+                val log = File(StoragePaths.root(this), "CORE/runtime-crash.log").apply { parentFile?.mkdirs() }
+                log.appendText("\n--- ${System.currentTimeMillis()} ${thread.name} ---\n${sw}\n")
+                if (isJ2meProcess) {
+                    j2meLogFile().appendText("\n--- runtime ${System.currentTimeMillis()} ${thread.name} ---\n${sw}\n")
                 }
-            }
-
-            if (isJ2meProcess) {
-                Process.killProcess(Process.myPid())
-                return@setDefaultUncaughtExceptionHandler
             }
             previous?.uncaughtException(thread, error)
         }
@@ -111,26 +100,10 @@ class EmuHubApp : Application() {
         if (!trace.getBoolean("active", false)) return
         val stage = trace.getString("stage", "unknown") ?: "unknown"
         val game = trace.getString("game", "unknown") ?: "unknown"
-        val extra = StringBuilder()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) runCatching {
-            val exit = getSystemService(ActivityManager::class.java).getHistoricalProcessExitReasons(packageName, 0, 5).firstOrNull()
-            if (exit != null) {
-                extra.appendLine("androidExitReason=${exit.reason}")
-                extra.appendLine("androidExitStatus=${exit.status}")
-                extra.appendLine("androidExitImportance=${exit.importance}")
-                extra.appendLine("androidExitDescription=${exit.description ?: ""}")
-            }
-        }
+        val at = trace.getLong("updated_at", 0L)
         runCatching {
-            j2meLogFile().writeText(buildString {
-                appendLine("EMU HUB J2ME PROCESS CRASH")
-                appendLine("time=${System.currentTimeMillis()}")
-                appendLine("game=$game")
-                appendLine("stage=$stage")
-                append(extra)
-            })
+            j2meLogFile().appendText("\nRecovered interrupted J2ME session: stage=$stage game=$game updated_at=$at\n")
         }
-        trace.edit().putString("last_crash_stage", stage).putString("last_crash_game", game).putLong("last_crash_time", System.currentTimeMillis()).putBoolean("active", false).commit()
-        if (!currentProcessName().endsWith(":j2me")) Toast.makeText(this, "J2ME crash captured: $stage • log emu-hub/J2ME/crash.txt", Toast.LENGTH_LONG).show()
+        trace.edit().putBoolean("active", false).putString("last_crash_stage", stage).apply()
     }
 }
