@@ -28,7 +28,8 @@ object BuiltinRomManager {
             }.isSuccess
             if (!installed) return
         }
-        mergeIntoLibraryCache(context, targetRoot)
+        runCatching { mergeIntoLibraryCache(context, targetRoot) }
+            .onFailure { error -> Log.w(TAG, "Unable to merge built-in ROMs into library cache", error) }
     }
 
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
