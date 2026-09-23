@@ -20,9 +20,7 @@ object BuiltinRomManager {
         val marker = File(targetRoot, MARKER)
         if (!marker.isFile) {
             val installed = runCatching {
-                check(targetRoot.isDirectory || targetRoot.mkdirs()) {
-                    "Unable to create built-in ROM directory: ${targetRoot.absolutePath}"
-                }
+                ensureDirectory(targetRoot)
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
                 marker.writeText("1")
             }.onFailure { error ->
@@ -37,20 +35,20 @@ object BuiltinRomManager {
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
         if (children.isEmpty()) {
-            target.parentFile?.let { parent ->
-                check(parent.isDirectory || parent.mkdirs()) {
-                    "Unable to create built-in ROM directory: ${parent.absolutePath}"
-                }
-            }
+            target.parentFile?.let(::ensureDirectory)
             context.assets.open(assetPath).use { input ->
                 target.outputStream().buffered().use { output -> input.copyTo(output) }
             }
             return
         }
-        check(target.isDirectory || target.mkdirs()) {
-            "Unable to create built-in ROM directory: ${target.absolutePath}"
-        }
+        ensureDirectory(target)
         children.forEach { child -> copyAssetTree(context, "$assetPath/$child", File(target, child)) }
+    }
+
+    private fun ensureDirectory(directory: File) {
+        check(directory.isDirectory || directory.mkdirs()) {
+            "Unable to create built-in ROM directory: ${directory.absolutePath}"
+        }
     }
 
     private fun mergeIntoLibraryCache(context: Context, root: File) {
