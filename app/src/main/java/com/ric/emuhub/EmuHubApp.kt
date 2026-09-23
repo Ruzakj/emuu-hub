@@ -44,12 +44,15 @@ class EmuHubApp : Application() {
             runCatching { storageInit.start() }
             StorageMaintenance.runAsync(this)
         } else if (!isPs2Process) {
-            val cacheClean = Thread({
-                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
-                runCatching { File(cacheDir, "ps2roms").deleteRecursively() }
-            }, "emuhub-cache-clean")
-            cacheClean.isDaemon = true
-            runCatching { cacheClean.start() }
+            val ps2Cache = File(cacheDir, "ps2roms")
+            if (ps2Cache.exists()) {
+                val cacheClean = Thread({
+                    runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+                    runCatching { ps2Cache.deleteRecursively() }
+                }, "emuhub-cache-clean")
+                cacheClean.isDaemon = true
+                runCatching { cacheClean.start() }
+            }
         }
 
         val coreTrace = getSharedPreferences("core_runtime_trace", MODE_PRIVATE)
