@@ -40,11 +40,12 @@ class EmuHubApp : Application() {
             val storageInit = Thread({
                 runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
                 runCatching { StoragePaths.ensureLayout(applicationContext) }
+                    .onFailure { Log.w(TAG, "Storage layout initialization failed", it) }
+                StorageMaintenance.runAsync(this)
             }, "emuhub-storage-init")
             storageInit.isDaemon = true
             runCatching { storageInit.start() }
                 .onFailure { Log.w(TAG, "Storage initialization thread failed to start", it) }
-            StorageMaintenance.runAsync(this)
         } else if (!isPs2Process) {
             val ps2Cache = File(cacheDir, "ps2roms")
             if (ps2Cache.exists()) {
