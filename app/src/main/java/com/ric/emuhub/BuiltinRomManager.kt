@@ -57,6 +57,15 @@ object BuiltinRomManager {
         }
     }
 
+    private fun isInsideRoot(file: File, canonicalRootPath: String?, absoluteRootPath: String): Boolean {
+        val canonicalPath = runCatching { file.canonicalPath }.getOrNull()
+        return if (canonicalPath != null && canonicalRootPath != null) {
+            canonicalPath.startsWith(canonicalRootPath)
+        } else {
+            file.absolutePath.startsWith(absoluteRootPath)
+        }
+    }
+
     private fun mergeIntoLibraryCache(context: Context, root: File) {
         if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -76,12 +85,7 @@ object BuiltinRomManager {
             val parsed = runCatching { Uri.parse(uri) }.getOrNull()
             val cachedFile = if (parsed?.scheme == "file") parsed.path?.let(::File) else null
             val isBuiltIn = cachedFile?.let { file ->
-                val canonicalPath = runCatching { file.canonicalPath }.getOrNull()
-                if (canonicalPath != null && canonicalRootPath != null) {
-                    canonicalPath.startsWith(canonicalRootPath)
-                } else {
-                    file.absolutePath.startsWith(absoluteRootPath)
-                }
+                isInsideRoot(file, canonicalRootPath, absoluteRootPath)
             } == true
             if (isBuiltIn && (cachedFile == null || !isSupportedRom(cachedFile))) continue
 
