@@ -23,6 +23,9 @@ object BuiltinRomManager {
             val installed = runCatching {
                 ensureDirectory(targetRoot)
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
+                check(containsSupportedRom(targetRoot)) {
+                    "Built-in ROM starter pack contains no supported ROMs"
+                }
                 marker.writeText("1")
             }.onFailure { error ->
                 Log.w(TAG, "Unable to install built-in ROM starter pack", error)
