@@ -80,7 +80,7 @@ object BuiltinRomManager {
                     file.absolutePath.startsWith(absoluteRootPath)
                 }
             } == true
-            if (isBuiltIn && cachedFile?.isFile != true) continue
+            if (isBuiltIn && (cachedFile?.isFile != true || cachedFile.extension.lowercase() !in supported)) continue
 
             byUri[uri] = item
         }
