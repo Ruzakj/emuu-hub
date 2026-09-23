@@ -2,11 +2,13 @@ package com.ric.emuhub
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 object BuiltinRomManager {
+    private const val TAG = "BuiltinRomManager"
     private const val PREFS = "emuhub_library"
     private const val CACHE_KEY = "library_cache_v2"
     private const val ASSET_ROOT = "builtin-roms"
@@ -21,6 +23,8 @@ object BuiltinRomManager {
                 targetRoot.mkdirs()
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
                 marker.writeText("1")
+            }.onFailure { error ->
+                Log.w(TAG, "Unable to install built-in ROM starter pack", error)
             }.isSuccess
             if (!installed) return
         }
