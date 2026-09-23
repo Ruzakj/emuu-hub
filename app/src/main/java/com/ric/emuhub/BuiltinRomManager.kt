@@ -6,6 +6,7 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 
 object BuiltinRomManager {
     private const val TAG = "BuiltinRomManager"
@@ -35,8 +36,10 @@ object BuiltinRomManager {
     private fun containsSupportedRom(root: File): Boolean =
         root.isDirectory && root.walkTopDown().any(::isSupportedRom)
 
+    private fun normalizedExtension(file: File): String = file.extension.lowercase(Locale.ROOT)
+
     private fun isSupportedRom(file: File): Boolean =
-        file.isFile && file.extension.lowercase() in supported
+        file.isFile && normalizedExtension(file) in supported
 
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
@@ -95,7 +98,8 @@ object BuiltinRomManager {
         root.walkTopDown()
             .filter(::isSupportedRom)
             .sortedBy { file ->
-                file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase() ?: file.name.lowercase()
+                file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase(Locale.ROOT)
+                    ?: file.name.lowercase(Locale.ROOT)
             }
             .forEach { file ->
                 val uri = Uri.fromFile(file).toString()
@@ -103,7 +107,7 @@ object BuiltinRomManager {
                 byUri[uri] = JSONObject()
                     .put("u", uri)
                     .put("n", file.name)
-                    .put("e", file.extension.lowercase())
+                    .put("e", normalizedExtension(file))
                     .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
             }
 
