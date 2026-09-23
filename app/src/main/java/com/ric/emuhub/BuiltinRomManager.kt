@@ -85,21 +85,20 @@ object BuiltinRomManager {
             byUri[uri] = item
         }
 
-        val builtInRoms = root.walkTopDown()
+        root.walkTopDown()
             .filter { it.isFile && it.extension.lowercase() in supported }
-            .toList()
             .sortedBy { file ->
                 file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase() ?: file.name.lowercase()
             }
-        builtInRoms.forEach { file ->
-            val uri = Uri.fromFile(file).toString()
-            val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
-            byUri[uri] = JSONObject()
-                .put("u", uri)
-                .put("n", file.name)
-                .put("e", file.extension.lowercase())
-                .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
-        }
+            .forEach { file ->
+                val uri = Uri.fromFile(file).toString()
+                val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
+                byUri[uri] = JSONObject()
+                    .put("u", uri)
+                    .put("n", file.name)
+                    .put("e", file.extension.lowercase())
+                    .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
+            }
 
         val merged = JSONArray()
         byUri.values.forEach { merged.put(it) }
