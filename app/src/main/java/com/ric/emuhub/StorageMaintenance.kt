@@ -32,6 +32,9 @@ object StorageMaintenance {
             }
         }, "emuhub-storage-maintenance")
 
+        // Maintenance must never keep the app process alive after the user leaves Emu Hub.
+        worker.isDaemon = true
+
         // Thread creation/start can fail under severe resource pressure. Release the guard so a later invocation
         // can retry instead of leaving storage maintenance permanently disabled for the rest of the process.
         try {
