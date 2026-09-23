@@ -61,7 +61,7 @@ object StorageMaintenance {
 
         // Engine installation is transactional. Only incomplete/old staging directories are disposable.
         val engineRoot = File(context.filesDir, "engine_packs")
-        engineRoot.listFiles()?.forEach { file ->
+        listFilesBestEffort(engineRoot, "engine pack directory").forEach { file ->
             if (file.name.startsWith("incoming-") || file.name == "previous") {
                 deleteRecursivelyBestEffort(file, "engine staging ${file.name}")
             }
@@ -72,7 +72,7 @@ object StorageMaintenance {
         context.getExternalFilesDir(null)?.let { externalFilesDir ->
             val updates = File(externalFilesDir, "updates")
             if (updates.isDirectory) {
-                updates.listFiles()?.forEach { file ->
+                listFilesBestEffort(updates, "update directory").forEach { file ->
                     // Package replacement makes old installers obsolete; same-version retries keep only recent files.
                     if (previousVersion != currentVersion || now - file.lastModified() > MAX_FAILED_UPDATE_AGE_MS) {
                         deleteRecursivelyBestEffort(file, "update artifact ${file.name}")
@@ -90,6 +90,14 @@ object StorageMaintenance {
         ) {
             Log.w(TAG, "Unable to persist storage maintenance completion")
         }
+    }
+
+    private fun listFilesBestEffort(directory: File, label: String): Array<File> {
+        if (!directory.isDirectory) return emptyArray()
+        return runCatching { directory.listFiles() }
+            .onFailure { error -> Log.w(TAG, "Unable to list $label at ${directory.absolutePath}", error) }
+            .getOrNull()
+            ?: emptyArray()
     }
 
     private fun deleteRecursivelyBestEffort(file: File, label: String) {
