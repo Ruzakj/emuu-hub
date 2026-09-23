@@ -43,6 +43,7 @@ class EmuHubApp : Application() {
             }, "emuhub-storage-init")
             storageInit.isDaemon = true
             runCatching { storageInit.start() }
+                .onFailure { Log.w(TAG, "Storage initialization thread failed to start", it) }
             StorageMaintenance.runAsync(this)
         } else if (!isPs2Process) {
             val ps2Cache = File(cacheDir, "ps2roms")
@@ -59,6 +60,7 @@ class EmuHubApp : Application() {
                 }, "emuhub-cache-clean")
                 cacheClean.isDaemon = true
                 runCatching { cacheClean.start() }
+                    .onFailure { Log.w(TAG, "Secondary cache cleanup thread failed to start", it) }
             }
         }
 
