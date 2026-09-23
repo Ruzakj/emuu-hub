@@ -22,6 +22,9 @@ object BuiltinRomManager {
         if (!marker.isFile || !containsSupportedRom(targetRoot)) {
             val installed = runCatching {
                 ensureDirectory(targetRoot)
+                if (marker.exists()) {
+                    check(marker.delete()) { "Unable to clear stale built-in ROM marker" }
+                }
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
                 check(containsSupportedRom(targetRoot)) {
                     "Built-in ROM starter pack contains no supported ROMs"
