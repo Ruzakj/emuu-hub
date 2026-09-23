@@ -49,7 +49,10 @@ object BuiltinRomManager {
         if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val cachedJson = prefs.getString(CACHE_KEY, "[]") ?: "[]"
-        val existing = runCatching { JSONArray(cachedJson) }.getOrElse { JSONArray() }
+        val existing = runCatching { JSONArray(cachedJson) }.getOrElse { error ->
+            Log.w(TAG, "Malformed ROM library cache; rebuilding built-in entries", error)
+            JSONArray()
+        }
         val byUri = LinkedHashMap<String, JSONObject>()
         val canonicalRootPath = runCatching { root.canonicalPath + File.separator }.getOrNull()
         val absoluteRootPath = root.absolutePath + File.separator
