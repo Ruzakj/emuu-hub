@@ -18,7 +18,7 @@ object BuiltinRomManager {
     fun install(context: Context) {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
-        if (!marker.isFile) {
+        if (!marker.isFile || !containsSupportedRom(targetRoot)) {
             val installed = runCatching {
                 ensureDirectory(targetRoot)
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
@@ -31,6 +31,9 @@ object BuiltinRomManager {
         runCatching { mergeIntoLibraryCache(context, targetRoot) }
             .onFailure { error -> Log.w(TAG, "Unable to merge built-in ROMs into library cache", error) }
     }
+
+    private fun containsSupportedRom(root: File): Boolean =
+        root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.lowercase() in supported }
 
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
