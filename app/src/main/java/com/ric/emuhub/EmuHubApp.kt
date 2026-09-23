@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import android.util.Log
 import android.widget.Toast
 import java.io.File
 import java.io.PrintWriter
@@ -49,6 +50,12 @@ class EmuHubApp : Application() {
                 val cacheClean = Thread({
                     runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
                     runCatching { ps2Cache.deleteRecursively() }
+                        .onFailure { Log.w(TAG, "Secondary PS2 cache cleanup failed: ${ps2Cache.absolutePath}", it) }
+                        .onSuccess { deleted ->
+                            if (!deleted && ps2Cache.exists()) {
+                                Log.w(TAG, "Secondary PS2 cache cleanup incomplete: ${ps2Cache.absolutePath}")
+                            }
+                        }
                 }, "emuhub-cache-clean")
                 cacheClean.isDaemon = true
                 runCatching { cacheClean.start() }
@@ -145,5 +152,9 @@ class EmuHubApp : Application() {
         }
         trace.edit().putString("last_crash_stage", stage).putString("last_crash_game", game).putLong("last_crash_time", System.currentTimeMillis()).putBoolean("active", false).commit()
         if (!currentProcessName().endsWith(":j2me")) Toast.makeText(this, "J2ME crash captured: $stage • log emu-hub/J2ME/crash.txt", Toast.LENGTH_LONG).show()
+    }
+
+    private companion object {
+        const val TAG = "EmuHubApp"
     }
 }
