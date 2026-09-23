@@ -53,7 +53,10 @@ object StorageMaintenance {
         // directories during rapid activity/process recreation while still running immediately after an update.
         if (previousVersion == currentVersion && now - lastRun in 0 until MIN_RUN_INTERVAL_MS) return
 
-        ArchiveHelper.cleanupStale(context.cacheDir)
+        // Archive cleanup is independent from the remaining maintenance stages. A malformed/stubborn cache entry
+        // should not prevent PS2 cache, engine staging, and stale update artifacts from being cleaned up.
+        runCatching { ArchiveHelper.cleanupStale(context.cacheDir) }
+            .onFailure { error -> Log.w(TAG, "Unable to clean stale archive cache", error) }
         deleteRecursivelyBestEffort(File(context.cacheDir, "ps2roms"), "PS2 ROM cache")
 
         // Engine installation is transactional. Only incomplete/old staging directories are disposable.
