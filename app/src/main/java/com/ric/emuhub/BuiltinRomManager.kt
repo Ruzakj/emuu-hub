@@ -33,7 +33,10 @@ object BuiltinRomManager {
     }
 
     private fun containsSupportedRom(root: File): Boolean =
-        root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.lowercase() in supported }
+        root.isDirectory && root.walkTopDown().any(::isSupportedRom)
+
+    private fun isSupportedRom(file: File): Boolean =
+        file.isFile && file.extension.lowercase() in supported
 
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
@@ -80,13 +83,13 @@ object BuiltinRomManager {
                     file.absolutePath.startsWith(absoluteRootPath)
                 }
             } == true
-            if (isBuiltIn && (cachedFile?.isFile != true || cachedFile.extension.lowercase() !in supported)) continue
+            if (isBuiltIn && (cachedFile == null || !isSupportedRom(cachedFile))) continue
 
             byUri[uri] = item
         }
 
         root.walkTopDown()
-            .filter { it.isFile && it.extension.lowercase() in supported }
+            .filter(::isSupportedRom)
             .sortedBy { file ->
                 file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase() ?: file.name.lowercase()
             }
