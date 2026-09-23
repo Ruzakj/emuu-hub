@@ -20,7 +20,9 @@ object BuiltinRomManager {
         val marker = File(targetRoot, MARKER)
         if (!marker.isFile) {
             val installed = runCatching {
-                targetRoot.mkdirs()
+                check(targetRoot.isDirectory || targetRoot.mkdirs()) {
+                    "Unable to create built-in ROM directory: ${targetRoot.absolutePath}"
+                }
                 copyAssetTree(context, ASSET_ROOT, targetRoot)
                 marker.writeText("1")
             }.onFailure { error ->
@@ -35,13 +37,19 @@ object BuiltinRomManager {
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
         if (children.isEmpty()) {
-            target.parentFile?.mkdirs()
+            target.parentFile?.let { parent ->
+                check(parent.isDirectory || parent.mkdirs()) {
+                    "Unable to create built-in ROM directory: ${parent.absolutePath}"
+                }
+            }
             context.assets.open(assetPath).use { input ->
                 target.outputStream().buffered().use { output -> input.copyTo(output) }
             }
             return
         }
-        target.mkdirs()
+        check(target.isDirectory || target.mkdirs()) {
+            "Unable to create built-in ROM directory: ${target.absolutePath}"
+        }
         children.forEach { child -> copyAssetTree(context, "$assetPath/$child", File(target, child)) }
     }
 
