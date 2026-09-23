@@ -36,6 +36,7 @@ class EmuHubApp : Application() {
 
         if (isMainProcess) {
             runCatching { BuiltinRomManager.install(this) }
+                .onFailure { Log.w(TAG, "Built-in ROM initialization failed", it) }
             EnginePackManager.bootstrapAsync(this)
             val storageInit = Thread({
                 runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
