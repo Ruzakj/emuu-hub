@@ -29,7 +29,8 @@ object BuiltinRomManager {
     fun install(context: Context) {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
-        val markerValid = marker.isFile && marker.length() <= MAX_MARKER_BYTES &&
+        val markerLength = if (marker.isFile) marker.length() else 0L
+        val markerValid = markerLength in 1..MAX_MARKER_BYTES &&
             runCatching { marker.readText().trim() == MARKER_CONTENT }.getOrDefault(false)
         val starterPackValid = markerValid && containsSupportedRom(targetRoot)
         if (!starterPackValid) {
