@@ -51,12 +51,14 @@ object BuiltinRomManager {
     }
 
     private fun containsSupportedRom(root: File): Boolean =
-        root.isDirectory && root.walkTopDown().any(::isSupportedRom)
+        root.isDirectory && root.walkTopDown().any { supportedExtension(it) != null }
 
     private fun normalizedExtension(file: File): String = file.extension.lowercase(Locale.ROOT)
 
-    private fun isSupportedRom(file: File): Boolean =
-        file.isFile && file.length() > 0L && normalizedExtension(file) in supported
+    private fun supportedExtension(file: File): String? {
+        if (!file.isFile || file.length() <= 0L) return null
+        return normalizedExtension(file).takeIf { it in supported }
+    }
 
     private fun copyAssetTree(context: Context, assetPath: String, target: File) {
         val children = context.assets.list(assetPath).orEmpty()
@@ -119,14 +121,14 @@ object BuiltinRomManager {
         }
 
         root.walkTopDown()
-            .filter(::isSupportedRom)
-            .map { file ->
+            .mapNotNull { file ->
+                val extension = supportedExtension(file) ?: return@mapNotNull null
                 val relativePath = relativeSortPath(file, root)
                 ScannedRom(
                     file = file,
                     relativePath = relativePath,
                     sortKey = relativePath.lowercase(Locale.ROOT),
-                    extension = normalizedExtension(file),
+                    extension = extension,
                     folder = relativeFolder(file, root),
                 )
             }
