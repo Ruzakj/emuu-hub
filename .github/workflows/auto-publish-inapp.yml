@@ -96,4 +96,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.dispatch.outputs.run_id }}
-        run: gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 5); do
+            if gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Stable release run $RUN_ID could not be verified after $attempt attempts." >&2
+              exit 1
+            fi
+            echo "Unable to verify stable release run yet; retrying in 10 seconds ($attempt/5)."
+            sleep 10
+          done
