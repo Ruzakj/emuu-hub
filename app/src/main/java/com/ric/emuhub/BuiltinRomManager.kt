@@ -20,6 +20,7 @@ object BuiltinRomManager {
         val file: File,
         val relativePath: String,
         val extension: String,
+        val folder: String,
     )
 
     fun install(context: Context) {
@@ -84,6 +85,9 @@ object BuiltinRomManager {
     private fun relativeSortPath(file: File, root: File): String =
         file.relativeToOrNull(root)?.invariantSeparatorsPath ?: file.name
 
+    private fun relativeFolder(file: File, root: File): String =
+        file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
+
     private fun mergeIntoLibraryCache(context: Context, root: File) {
         if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -117,6 +121,7 @@ object BuiltinRomManager {
                     file = file,
                     relativePath = relativeSortPath(file, root),
                     extension = normalizedExtension(file),
+                    folder = relativeFolder(file, root),
                 )
             }
             .filter { rom -> rom.extension in supported }
@@ -127,12 +132,11 @@ object BuiltinRomManager {
             .forEach { rom ->
                 val file = rom.file
                 val uri = Uri.fromFile(file).toString()
-                val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
                 byUri[uri] = JSONObject()
                     .put("u", uri)
                     .put("n", file.name)
                     .put("e", rom.extension)
-                    .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
+                    .put("f", if (rom.folder.isBlank()) "Built-in" else "Built-in/${rom.folder}")
             }
 
         val merged = JSONArray()
