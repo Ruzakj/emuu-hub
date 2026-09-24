@@ -116,15 +116,16 @@ object BuiltinRomManager {
 
         root.walkTopDown()
             .filter { file -> file.isFile }
-            .map { file ->
+            .mapNotNull { file ->
+                val extension = normalizedExtension(file)
+                if (extension !in supported) return@mapNotNull null
                 ScannedRom(
                     file = file,
                     relativePath = relativeSortPath(file, root),
-                    extension = normalizedExtension(file),
+                    extension = extension,
                     folder = relativeFolder(file, root),
                 )
             }
-            .filter { rom -> rom.extension in supported }
             .sortedWith(
                 compareBy<ScannedRom> { it.relativePath.lowercase(Locale.ROOT) }
                     .thenBy { it.relativePath }
