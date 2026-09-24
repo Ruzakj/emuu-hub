@@ -79,13 +79,10 @@ object BuiltinRomManager {
         }
     }
 
-    private fun isInsideRoot(file: File, canonicalRootPath: String?, absoluteRootPath: String): Boolean {
-        val canonicalPath = runCatching { file.canonicalPath }.getOrNull()
-        return if (canonicalPath != null && canonicalRootPath != null) {
-            canonicalPath.startsWith(canonicalRootPath)
-        } else {
-            file.absolutePath.startsWith(absoluteRootPath)
-        }
+    private fun isInsideRoot(file: File, canonicalRootPath: String?): Boolean {
+        val rootPath = canonicalRootPath ?: return false
+        val canonicalPath = runCatching { file.canonicalPath }.getOrNull() ?: return false
+        return canonicalPath.startsWith(rootPath)
     }
 
     private fun relativeSortPath(file: File, root: File): String =
@@ -104,7 +101,6 @@ object BuiltinRomManager {
         }
         val byUri = LinkedHashMap<String, JSONObject>()
         val canonicalRootPath = runCatching { root.canonicalPath + File.separator }.getOrNull()
-        val absoluteRootPath = root.absolutePath + File.separator
         for (i in 0 until existing.length()) {
             val item = existing.optJSONObject(i) ?: continue
             val uri = item.optString("u")
@@ -113,7 +109,7 @@ object BuiltinRomManager {
             val parsed = runCatching { Uri.parse(uri) }.getOrNull()
             val cachedFile = if (parsed?.scheme == "file") parsed.path?.let(::File) else null
             val isBuiltIn = cachedFile?.let { file ->
-                isInsideRoot(file, canonicalRootPath, absoluteRootPath)
+                isInsideRoot(file, canonicalRootPath)
             } == true
             if (isBuiltIn) continue
 
