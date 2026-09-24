@@ -29,7 +29,7 @@ object BuiltinRomManager {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
         val markerValid = marker.isFile &&
-            runCatching { marker.readText() == MARKER_CONTENT }.getOrDefault(false)
+            runCatching { marker.readText().trim() == MARKER_CONTENT }.getOrDefault(false)
         if (!markerValid || !containsSupportedRom(targetRoot)) {
             val installed = runCatching {
                 ensureDirectory(targetRoot)
