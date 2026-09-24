@@ -106,11 +106,12 @@ object BuiltinRomManager {
 
         root.walkTopDown()
             .filter(::isSupportedRom)
+            .map { file -> file to relativeSortPath(file, root) }
             .sortedWith(
-                compareBy<File> { relativeSortPath(it, root).lowercase(Locale.ROOT) }
-                    .thenBy { relativeSortPath(it, root) }
+                compareBy<Pair<File, String>> { it.second.lowercase(Locale.ROOT) }
+                    .thenBy { it.second }
             )
-            .forEach { file ->
+            .forEach { (file, _) ->
                 val uri = Uri.fromFile(file).toString()
                 val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
                 byUri[uri] = JSONObject()
