@@ -14,6 +14,7 @@ object BuiltinRomManager {
     private const val CACHE_KEY = "library_cache_v2"
     private const val ASSET_ROOT = "builtin-roms"
     private const val MARKER = ".builtin_roms_v1"
+    private const val MARKER_CONTENT = "1"
     private val supported = setOf("gb", "gbc", "gba", "nes", "sfc", "smc")
 
     private data class ScannedRom(
@@ -27,7 +28,9 @@ object BuiltinRomManager {
     fun install(context: Context) {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
-        if (!marker.isFile || !containsSupportedRom(targetRoot)) {
+        val markerValid = marker.isFile &&
+            runCatching { marker.readText() == MARKER_CONTENT }.getOrDefault(false)
+        if (!markerValid || !containsSupportedRom(targetRoot)) {
             val installed = runCatching {
                 ensureDirectory(targetRoot)
                 if (marker.exists()) {
@@ -37,7 +40,7 @@ object BuiltinRomManager {
                 check(containsSupportedRom(targetRoot)) {
                     "Built-in ROM starter pack contains no supported ROMs"
                 }
-                marker.writeText("1")
+                marker.writeText(MARKER_CONTENT)
             }.onFailure { error ->
                 Log.w(TAG, "Unable to install built-in ROM starter pack", error)
             }.isSuccess
