@@ -75,6 +75,9 @@ object BuiltinRomManager {
         }
     }
 
+    private fun relativeSortPath(file: File, root: File): String =
+        file.relativeToOrNull(root)?.invariantSeparatorsPath ?: file.name
+
     private fun mergeIntoLibraryCache(context: Context, root: File) {
         if (!root.isDirectory) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -103,10 +106,10 @@ object BuiltinRomManager {
 
         root.walkTopDown()
             .filter(::isSupportedRom)
-            .sortedBy { file ->
-                file.relativeToOrNull(root)?.invariantSeparatorsPath?.lowercase(Locale.ROOT)
-                    ?: file.name.lowercase(Locale.ROOT)
-            }
+            .sortedWith(
+                compareBy<File> { relativeSortPath(it, root).lowercase(Locale.ROOT) }
+                    .thenBy { relativeSortPath(it, root) }
+            )
             .forEach { file ->
                 val uri = Uri.fromFile(file).toString()
                 val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
