@@ -15,6 +15,7 @@ object BuiltinRomManager {
     private const val ASSET_ROOT = "builtin-roms"
     private const val MARKER = ".builtin_roms_v1"
     private const val MARKER_CONTENT = "1"
+    private const val MAX_MARKER_BYTES = 64L
     private val supported = setOf("gb", "gbc", "gba", "nes", "sfc", "smc")
 
     private data class ScannedRom(
@@ -28,7 +29,7 @@ object BuiltinRomManager {
     fun install(context: Context) {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
-        val markerValid = marker.isFile &&
+        val markerValid = marker.isFile && marker.length() <= MAX_MARKER_BYTES &&
             runCatching { marker.readText().trim() == MARKER_CONTENT }.getOrDefault(false)
         val starterPackValid = markerValid && containsSupportedRom(targetRoot)
         if (!starterPackValid) {
