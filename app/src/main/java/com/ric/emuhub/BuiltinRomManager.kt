@@ -99,7 +99,7 @@ object BuiltinRomManager {
             val isBuiltIn = cachedFile?.let { file ->
                 isInsideRoot(file, canonicalRootPath, absoluteRootPath)
             } == true
-            if (isBuiltIn && (cachedFile == null || !isSupportedRom(cachedFile))) continue
+            if (isBuiltIn) continue
 
             byUri[uri] = item
         }
