@@ -19,6 +19,7 @@ object BuiltinRomManager {
     private data class ScannedRom(
         val file: File,
         val relativePath: String,
+        val sortKey: String,
         val extension: String,
         val folder: String,
     )
@@ -119,15 +120,17 @@ object BuiltinRomManager {
             .mapNotNull { file ->
                 val extension = normalizedExtension(file)
                 if (extension !in supported) return@mapNotNull null
+                val relativePath = relativeSortPath(file, root)
                 ScannedRom(
                     file = file,
-                    relativePath = relativeSortPath(file, root),
+                    relativePath = relativePath,
+                    sortKey = relativePath.lowercase(Locale.ROOT),
                     extension = extension,
                     folder = relativeFolder(file, root),
                 )
             }
             .sortedWith(
-                compareBy<ScannedRom> { it.relativePath.lowercase(Locale.ROOT) }
+                compareBy<ScannedRom> { it.sortKey }
                     .thenBy { it.relativePath }
             )
             .forEach { rom ->
