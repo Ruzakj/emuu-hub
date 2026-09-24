@@ -105,19 +105,20 @@ object BuiltinRomManager {
         }
 
         root.walkTopDown()
-            .filter(::isSupportedRom)
-            .map { file -> file to relativeSortPath(file, root) }
+            .filter { file -> file.isFile }
+            .map { file -> Triple(file, relativeSortPath(file, root), normalizedExtension(file)) }
+            .filter { (_, _, extension) -> extension in supported }
             .sortedWith(
-                compareBy<Pair<File, String>> { it.second.lowercase(Locale.ROOT) }
+                compareBy<Triple<File, String, String>> { it.second.lowercase(Locale.ROOT) }
                     .thenBy { it.second }
             )
-            .forEach { (file, _) ->
+            .forEach { (file, _, extension) ->
                 val uri = Uri.fromFile(file).toString()
                 val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
                 byUri[uri] = JSONObject()
                     .put("u", uri)
                     .put("n", file.name)
-                    .put("e", normalizedExtension(file))
+                    .put("e", extension)
                     .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
             }
 
