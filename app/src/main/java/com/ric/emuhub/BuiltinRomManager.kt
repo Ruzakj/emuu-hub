@@ -16,6 +16,12 @@ object BuiltinRomManager {
     private const val MARKER = ".builtin_roms_v1"
     private val supported = setOf("gb", "gbc", "gba", "nes", "sfc", "smc")
 
+    private data class ScannedRom(
+        val file: File,
+        val relativePath: String,
+        val extension: String,
+    )
+
     fun install(context: Context) {
         val targetRoot = File(context.filesDir, ASSET_ROOT)
         val marker = File(targetRoot, MARKER)
@@ -106,19 +112,26 @@ object BuiltinRomManager {
 
         root.walkTopDown()
             .filter { file -> file.isFile }
-            .map { file -> Triple(file, relativeSortPath(file, root), normalizedExtension(file)) }
-            .filter { (_, _, extension) -> extension in supported }
+            .map { file ->
+                ScannedRom(
+                    file = file,
+                    relativePath = relativeSortPath(file, root),
+                    extension = normalizedExtension(file),
+                )
+            }
+            .filter { rom -> rom.extension in supported }
             .sortedWith(
-                compareBy<Triple<File, String, String>> { it.second.lowercase(Locale.ROOT) }
-                    .thenBy { it.second }
+                compareBy<ScannedRom> { it.relativePath.lowercase(Locale.ROOT) }
+                    .thenBy { it.relativePath }
             )
-            .forEach { (file, _, extension) ->
+            .forEach { rom ->
+                val file = rom.file
                 val uri = Uri.fromFile(file).toString()
                 val folder = file.parentFile?.relativeToOrNull(root)?.invariantSeparatorsPath.orEmpty()
                 byUri[uri] = JSONObject()
                     .put("u", uri)
                     .put("n", file.name)
-                    .put("e", extension)
+                    .put("e", rom.extension)
                     .put("f", if (folder.isBlank()) "Built-in" else "Built-in/$folder")
             }
 
