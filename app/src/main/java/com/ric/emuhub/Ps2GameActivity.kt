@@ -72,6 +72,19 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private var perfPolling = false
     private var activeProfile = Ps2Profile("Auto Z9x", 2f, -2, 0, true, 0)
     private var gameSpeedPercent = 100
+    private var controllerScale = 0.72f
+    private var controllerOpacity = 0.62f
+
+    private fun controllerPrefs() = getSharedPreferences("ps2_controller_ui", MODE_PRIVATE)
+    private fun loadControllerUi() {
+        controllerScale = controllerPrefs().getFloat("scale", 0.72f).coerceIn(0.50f, 1.00f)
+        controllerOpacity = controllerPrefs().getFloat("opacity", 0.62f).coerceIn(0.20f, 1.00f)
+    }
+    private fun saveControllerUi(scale: Float, opacity: Float) {
+        controllerScale = scale.coerceIn(0.50f, 1.00f)
+        controllerOpacity = opacity.coerceIn(0.20f, 1.00f)
+        controllerPrefs().edit().putFloat("scale", controllerScale).putFloat("opacity", controllerOpacity).apply()
+    }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -100,6 +113,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
 
+        loadControllerUi()
         romPath = intent.getStringExtra("romPath").orEmpty()
         if (!biosOnly && (romPath.isBlank() || !File(romPath).isFile)) {
             trace("rom-missing", false); Toast.makeText(this, "PS2 ROM tidak ditemukan.", Toast.LENGTH_LONG).show(); finish(); return
@@ -137,9 +151,12 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54) {
-        root.addView(button, FrameLayout.LayoutParams(dp(w), dp(h), gravity).apply {
-            leftMargin = dp(left); topMargin = dp(top); rightMargin = dp(right); bottomMargin = dp(bottom)
+        val scale = controllerScale
+        root.addView(button, FrameLayout.LayoutParams(dp((w * scale).toInt()), dp((h * scale).toInt()), gravity).apply {
+            leftMargin = dp((left * scale).toInt()); topMargin = dp((top * scale).toInt())
+            rightMargin = dp((right * scale).toInt()); bottomMargin = dp((bottom * scale).toInt())
         })
+        button.alpha = controllerOpacity
     }
 
     private inner class AnalogStickView(private val rightStick: Boolean = false) : View(this@Ps2GameActivity) {
@@ -299,6 +316,36 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
                 override fun onStopTrackingTouch(seekBar: SeekBar?) { applyGameSpeed((seekBar?.progress ?: 75) + 25) }
             })
+        })
+
+        panel.addView(Button(this).apply {
+            text = "Controller UI • ${(controllerScale * 100).toInt()}% • ${(controllerOpacity * 100).toInt()}%"
+            isAllCaps = false
+            setOnClickListener {
+                val box = LinearLayout(this@Ps2GameActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)) }
+                val sizeLabel = TextView(this@Ps2GameActivity).apply { text = "Ukuran: ${(controllerScale * 100).toInt()}%"; setTextColor(Color.WHITE) }
+                val sizeBar = SeekBar(this@Ps2GameActivity).apply { max = 50; progress = ((controllerScale * 100).toInt() - 50).coerceIn(0, 50) }
+                sizeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(b: SeekBar?, v: Int, from: Boolean) { sizeLabel.text = "Ukuran: ${v + 50}%" }
+                    override fun onStartTrackingTouch(b: SeekBar?) {}
+                    override fun onStopTrackingTouch(b: SeekBar?) {}
+                })
+                val opacityLabel = TextView(this@Ps2GameActivity).apply { text = "Opacity: ${(controllerOpacity * 100).toInt()}%"; setTextColor(Color.WHITE) }
+                val opacityBar = SeekBar(this@Ps2GameActivity).apply { max = 80; progress = ((controllerOpacity * 100).toInt() - 20).coerceIn(0, 80) }
+                opacityBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(b: SeekBar?, v: Int, from: Boolean) { opacityLabel.text = "Opacity: ${v + 20}%" }
+                    override fun onStartTrackingTouch(b: SeekBar?) {}
+                    override fun onStopTrackingTouch(b: SeekBar?) {}
+                })
+                box.addView(sizeLabel); box.addView(sizeBar); box.addView(opacityLabel); box.addView(opacityBar)
+                AlertDialog.Builder(this@Ps2GameActivity).setTitle("Controller UI").setView(box)
+                    .setNeutralButton("RESET") { _, _ -> saveControllerUi(.72f, .62f); Toast.makeText(this@Ps2GameActivity, "Reset. Buka ulang game.", Toast.LENGTH_SHORT).show() }
+                    .setNegativeButton("BATAL", null)
+                    .setPositiveButton("SIMPAN") { _, _ ->
+                        saveControllerUi((sizeBar.progress + 50) / 100f, (opacityBar.progress + 20) / 100f)
+                        Toast.makeText(this@Ps2GameActivity, "Tersimpan. Buka ulang game untuk menerapkan.", Toast.LENGTH_SHORT).show()
+                    }.show()
+            }
         })
 
         val profileButton = Button(this).apply {
