@@ -74,6 +74,8 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private var gameSpeedPercent = 100
     private var controllerScale = 0.58f
     private var controllerOpacity = 0.62f
+    private var controllerEditMode = false
+    private val movableControls = LinkedHashMap<String, View>()
 
     private fun controllerPrefs() = getSharedPreferences("ps2_controller_ui", MODE_PRIVATE)
     private fun loadControllerUi() {
@@ -150,7 +152,45 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
         alpha=.92f;layoutParams=FrameLayout.LayoutParams(dp(size),dp(size))
     }
 
-    private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54) {
+    private fun makeMovable(id: String, view: View) {
+        movableControls[id] = view
+        val p = controllerPrefs()
+        view.post {
+            if (p.contains("x_$id")) view.x = p.getFloat("x_$id", view.x)
+            if (p.contains("y_$id")) view.y = p.getFloat("y_$id", view.y)
+        }
+        var dx = 0f; var dy = 0f
+        view.setOnLongClickListener {
+            controllerEditMode = true
+            Toast.makeText(this, "EDIT CONTROLLER • drag tombol, TUNE untuk selesai", Toast.LENGTH_SHORT).show()
+            true
+        }
+        view.setOnTouchListener { v, e ->
+            if (!controllerEditMode) return@setOnTouchListener false
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { dx = v.x - e.rawX; dy = v.y - e.rawY; v.alpha = 1f }
+                MotionEvent.ACTION_MOVE -> {
+                    val parent = v.parent as? View ?: return@setOnTouchListener true
+                    v.x = (e.rawX + dx).coerceIn(0f, (parent.width - v.width).coerceAtLeast(0).toFloat())
+                    v.y = (e.rawY + dy).coerceIn(0f, (parent.height - v.height).coerceAtLeast(0).toFloat())
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    controllerPrefs().edit().putFloat("x_$id", v.x).putFloat("y_$id", v.y).apply()
+                    v.alpha = controllerOpacity
+                }
+            }
+            true
+        }
+    }
+
+    private fun resetControllerPositions() {
+        val edit = controllerPrefs().edit()
+        movableControls.keys.forEach { edit.remove("x_$it").remove("y_$it") }
+        edit.apply()
+        Toast.makeText(this, "Layout controller di-reset. Buka ulang game.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54, moveId: String? = null) {
         // Keep the utility/shoulder row readable; shrink only the gameplay controls at the bottom.
         val scale = if ((gravity and Gravity.TOP) == Gravity.TOP) 1f else controllerScale
         root.addView(button, FrameLayout.LayoutParams(dp((w * scale).toInt()), dp((h * scale).toInt()), gravity).apply {
@@ -158,6 +198,7 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             rightMargin = dp((right * scale).toInt()); bottomMargin = dp((bottom * scale).toInt())
         })
         button.alpha = if ((gravity and Gravity.TOP) == Gravity.TOP) 0.92f else controllerOpacity
+        if (moveId != null) makeMovable(moveId, button)
     }
 
     private inner class AnalogStickView(private val rightStick: Boolean = false) : View(this@Ps2GameActivity) {
@@ -211,17 +252,17 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             addControl(root, control("R2", KeyEvent.KEYCODE_BUTTON_R2, 44), Gravity.TOP or Gravity.END, right = 108, top = 8, w = 44, h = 36)
             addControl(root, Button(this).apply { text = "TUNE"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { openQuickMenu() } }, Gravity.TOP or Gravity.END, top = 8, right = 58, w = 46, h = 36)
             addControl(root, Button(this).apply { text = "EXIT"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66); setOnClickListener { finish() } }, Gravity.TOP or Gravity.END, top = 8, right = 8, w = 46, h = 36)
-            addControl(root,DPadView(),Gravity.BOTTOM or Gravity.START,left=18,bottom=18,w=160,h=160)
-            addControl(root, AnalogStickView(false), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132)
-            addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 252, bottom = 150, w = 42, h = 32)
-            addControl(root, AnalogStickView(true), Gravity.BOTTOM or Gravity.END, right = 205, bottom = 28, w = 132, h = 132)
-            addControl(root, control("R3", KeyEvent.KEYCODE_BUTTON_THUMBR, 48), Gravity.BOTTOM or Gravity.END, right = 252, bottom = 150, w = 42, h = 32)
-            addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126)
-            addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18)
-            addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72)
-            addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72)
-            addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -52, bottom = 12, w = 64, h = 30)
-            addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -52, bottom = 12, w = 64, h = 30)
+            addControl(root,DPadView(),Gravity.BOTTOM or Gravity.START,left=18,bottom=18,w=160,h=160,moveId="dpad")
+            addControl(root, AnalogStickView(false), Gravity.BOTTOM or Gravity.START, left = 205, bottom = 28, w = 132, h = 132, moveId = "analog_l")
+            addControl(root, control("L3", KeyEvent.KEYCODE_BUTTON_THUMBL, 48), Gravity.BOTTOM or Gravity.START, left = 252, bottom = 150, w = 42, h = 32, moveId = "l3")
+            addControl(root, AnalogStickView(true), Gravity.BOTTOM or Gravity.END, right = 205, bottom = 28, w = 132, h = 132, moveId = "analog_r")
+            addControl(root, control("R3", KeyEvent.KEYCODE_BUTTON_THUMBR, 48), Gravity.BOTTOM or Gravity.END, right = 252, bottom = 150, w = 42, h = 32, moveId = "r3")
+            addControl(root, control("△", KeyEvent.KEYCODE_BUTTON_Y), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 126, moveId = "triangle")
+            addControl(root, control("✕", KeyEvent.KEYCODE_BUTTON_A), Gravity.BOTTOM or Gravity.END, right = 72, bottom = 18, moveId = "cross")
+            addControl(root, control("□", KeyEvent.KEYCODE_BUTTON_X), Gravity.BOTTOM or Gravity.END, right = 126, bottom = 72, moveId = "square")
+            addControl(root, control("○", KeyEvent.KEYCODE_BUTTON_B), Gravity.BOTTOM or Gravity.END, right = 18, bottom = 72, moveId = "circle")
+            addControl(root, control("SELECT", KeyEvent.KEYCODE_BUTTON_SELECT, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, left = -52, bottom = 12, w = 64, h = 30, moveId = "select")
+            addControl(root, control("START", KeyEvent.KEYCODE_BUTTON_START, 58), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, right = -52, bottom = 12, w = 64, h = 30, moveId = "start")
 
             stateSlotButton = Button(this).apply {
                 text = "S0"; textSize = 9f; isAllCaps = false; setTextColor(Color.WHITE); background = rounded(0x66)
@@ -317,6 +358,21 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
                 override fun onStopTrackingTouch(seekBar: SeekBar?) { applyGameSpeed((seekBar?.progress ?: 75) + 25) }
             })
+        })
+
+        panel.addView(Button(this).apply {
+            text = if (controllerEditMode) "SELESAI EDIT LAYOUT" else "EDIT LAYOUT CONTROLLER"
+            isAllCaps = false
+            setOnClickListener {
+                controllerEditMode = !controllerEditMode
+                Toast.makeText(this@Ps2GameActivity, if(controllerEditMode) "Drag setiap kontrol ke posisi yang diinginkan" else "Layout controller tersimpan", Toast.LENGTH_SHORT).show()
+                dismissQuickMenuSafely()
+            }
+        })
+        panel.addView(Button(this).apply {
+            text = "RESET POSISI CONTROLLER"
+            isAllCaps = false
+            setOnClickListener { resetControllerPositions() }
         })
 
         panel.addView(Button(this).apply {
