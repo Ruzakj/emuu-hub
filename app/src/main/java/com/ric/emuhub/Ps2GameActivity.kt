@@ -366,7 +366,6 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             setOnClickListener {
                 controllerEditMode = !controllerEditMode
                 Toast.makeText(this@Ps2GameActivity, if(controllerEditMode) "Drag setiap kontrol ke posisi yang diinginkan" else "Layout controller tersimpan", Toast.LENGTH_SHORT).show()
-                dismissQuickMenuSafely()
             }
         })
         panel.addView(Button(this).apply {
