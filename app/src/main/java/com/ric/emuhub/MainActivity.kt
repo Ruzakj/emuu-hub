@@ -46,6 +46,8 @@ class MainActivity : Activity() {
         private const val KEY_LIBRARY_CACHE = "library_cache_v2"
         private const val KEY_PSP_RESOLUTION = "psp_resolution"
         private const val KEY_RECENT_PLAYED = "recent_played_v1"
+        private const val MAX_LIBRARY_GAMES = 2500
+        private const val MAX_METADATA_CACHE = 512
 
         private val INTERNAL = setOf("gb","gbc","gba","nes","sfc","smc","bin","cue","chd","iso","cso","ecm")
         private val SWITCH = setOf("xci","nsp","nro")
@@ -68,8 +70,12 @@ class MainActivity : Activity() {
     private var pendingArchiveSession: File? = null
     private var allLibraryGames: List<GameEntry> = emptyList()
     private var activeConsoleFilter: String? = null
-    private val consoleHintCache = HashMap<String, String>()
-    private val gameTitleCache = HashMap<String, String>()
+    private val consoleHintCache = object : LinkedHashMap<String, String>(MAX_METADATA_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > MAX_METADATA_CACHE
+    }
+    private val gameTitleCache = object : LinkedHashMap<String, String>(MAX_METADATA_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > MAX_METADATA_CACHE
+    }
     private var libraryRenderLimit = 12
     private val coverCache = object : LruCache<String, Bitmap>(12) {}
 
@@ -234,7 +240,7 @@ class MainActivity : Activity() {
         if(trees.isEmpty()){saveCache(builtin);if(builtin.isEmpty())showEmptyLibrary() else renderLibrary(builtin,"${builtin.size} built-in game");if(userRequested)chooseRomFolder();return}
         status.text=if(userRequested)"Refreshing ${trees.size} folder..." else "Library ready • background scan"
         val pending=AtomicInteger(trees.size);val merged=java.util.Collections.synchronizedList(mutableListOf<GameEntry>())
-        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames((builtin+merged).distinctBy{it.uri});saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • built-in + ${trees.size} folder")}}}}
+        trees.forEach{raw->scanExecutor.execute{val root=DocumentFile.fromTreeUri(this,Uri.parse(raw));if(root!=null)collectGames(root,merged,1200,root.name?:"ROM");if(pending.decrementAndGet()==0){val unique=sortGames((builtin+merged).distinctBy{it.uri}.take(MAX_LIBRARY_GAMES));saveCache(unique);runOnUiThread{if(unique.isEmpty())showEmptyLibrary() else renderLibrary(unique,"${unique.size} game • built-in + ${trees.size} folder")}}}}
     }
 
     private fun collectGames(dir:DocumentFile,out:MutableList<GameEntry>,limit:Int,folder:String){
@@ -273,7 +279,9 @@ class MainActivity : Activity() {
             "sfc","smc"->"SNES"
             in GC_WII->"GC/WII"
             "xci","nsp","nro"->"SWITCH"
-            "iso"->folderConsoleHint(g) ?: probeIsoTarget(Uri.parse(g.uri)) ?: "DISC"
+            // Never inspect multi-GB ISO contents while building/sorting a large library.
+            // Exact ISO detection is deferred until the user launches the title.
+            "iso"->folderConsoleHint(g) ?: "DISC"
             "chd"->folderConsoleHint(g) ?: "DISC"
             in ARCHIVES->"ARCHIVE"
             else->"OTHER"
@@ -336,13 +344,14 @@ class MainActivity : Activity() {
     }.getOrNull()
 
     private fun renderLibrary(games:List<GameEntry>,label:String){
-        allLibraryGames=games
+        allLibraryGames = if (games.size > MAX_LIBRARY_GAMES) games.take(MAX_LIBRARY_GAMES) else games
+        val safeGames = allLibraryGames
         library.removeAllViews()
-        val visible=activeConsoleFilter?.let{f->games.filter{inferredConsole(it)==f}}?:games
+        val visible=activeConsoleFilter?.let{f->safeGames.filter{inferredConsole(it)==f}}?:safeGames
         countBadge.text="${visible.size} GAMES"
         status.text=if(activeConsoleFilter==null)"$label • tap a game and Emu Hub picks the engine" else "${activeConsoleFilter} • ${visible.size} game"
 
-        val byUri=games.associateBy{it.uri}
+        val byUri=safeGames.associateBy{it.uri}
         val recent=loadRecentlyPlayed().map{r->byUri[r.uri]?:r}.distinctBy{it.uri}.take(6)
         if(recent.isNotEmpty()){
             val recentHeader=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
@@ -358,7 +367,7 @@ class MainActivity : Activity() {
 
         val filtersHeader=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
         filtersHeader.addView(textView("GAME LIBRARY",10.5f,0xFFB9C3D1.toInt(),true).apply{letterSpacing=0.12f},LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-        filtersHeader.addView(textView("${games.size} TOTAL",9f,0xFF697586.toInt(),true))
+        filtersHeader.addView(textView("${safeGames.size} TOTAL",9f,0xFF697586.toInt(),true))
         library.addView(filtersHeader,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply{topMargin=if(recent.isNotEmpty())dp(22) else 0;bottomMargin=dp(9)})
         library.addView(buildFilterStrip(),LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(42)).apply{bottomMargin=dp(12)})
 
@@ -439,6 +448,7 @@ class MainActivity : Activity() {
             frame.addView(ImageView(this).apply{setImageBitmap(cached);scaleType=ImageView.ScaleType.CENTER_CROP},0,FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT))
         } else {
             scanExecutor.execute {
+                if (isFinishing || isDestroyed) return@execute
                 val file=localCoverFile(g)
                 val bmp=file?.let{decodeCoverSampled(it,dp(180),height)}
                 if(bmp!=null){
