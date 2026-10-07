@@ -72,16 +72,16 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     private var perfPolling = false
     private var activeProfile = Ps2Profile("Auto Z9x", 2f, -2, 0, true, 0)
     private var gameSpeedPercent = 100
-    private var controllerScale = 0.72f
+    private var controllerScale = 0.58f
     private var controllerOpacity = 0.62f
 
     private fun controllerPrefs() = getSharedPreferences("ps2_controller_ui", MODE_PRIVATE)
     private fun loadControllerUi() {
-        controllerScale = controllerPrefs().getFloat("scale", 0.72f).coerceIn(0.50f, 1.00f)
+        controllerScale = controllerPrefs().getFloat("scale", 0.58f).coerceIn(0.45f, 0.85f)
         controllerOpacity = controllerPrefs().getFloat("opacity", 0.62f).coerceIn(0.20f, 1.00f)
     }
     private fun saveControllerUi(scale: Float, opacity: Float) {
-        controllerScale = scale.coerceIn(0.50f, 1.00f)
+        controllerScale = scale.coerceIn(0.45f, 0.85f)
         controllerOpacity = opacity.coerceIn(0.20f, 1.00f)
         controllerPrefs().edit().putFloat("scale", controllerScale).putFloat("opacity", controllerOpacity).apply()
     }
@@ -151,12 +151,13 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun addControl(root: FrameLayout, button: View, gravity: Int, left: Int = 0, top: Int = 0, right: Int = 0, bottom: Int = 0, w: Int = 54, h: Int = 54) {
-        val scale = controllerScale
+        // Keep the utility/shoulder row readable; shrink only the gameplay controls at the bottom.
+        val scale = if ((gravity and Gravity.TOP) == Gravity.TOP) 1f else controllerScale
         root.addView(button, FrameLayout.LayoutParams(dp((w * scale).toInt()), dp((h * scale).toInt()), gravity).apply {
             leftMargin = dp((left * scale).toInt()); topMargin = dp((top * scale).toInt())
             rightMargin = dp((right * scale).toInt()); bottomMargin = dp((bottom * scale).toInt())
         })
-        button.alpha = controllerOpacity
+        button.alpha = if ((gravity and Gravity.TOP) == Gravity.TOP) 0.92f else controllerOpacity
     }
 
     private inner class AnalogStickView(private val rightStick: Boolean = false) : View(this@Ps2GameActivity) {
@@ -324,9 +325,9 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
             setOnClickListener {
                 val box = LinearLayout(this@Ps2GameActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), dp(10)) }
                 val sizeLabel = TextView(this@Ps2GameActivity).apply { text = "Ukuran: ${(controllerScale * 100).toInt()}%"; setTextColor(Color.WHITE) }
-                val sizeBar = SeekBar(this@Ps2GameActivity).apply { max = 50; progress = ((controllerScale * 100).toInt() - 50).coerceIn(0, 50) }
+                val sizeBar = SeekBar(this@Ps2GameActivity).apply { max = 40; progress = ((controllerScale * 100).toInt() - 45).coerceIn(0, 40) }
                 sizeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(b: SeekBar?, v: Int, from: Boolean) { sizeLabel.text = "Ukuran: ${v + 50}%" }
+                    override fun onProgressChanged(b: SeekBar?, v: Int, from: Boolean) { sizeLabel.text = "Ukuran: ${v + 45}%" }
                     override fun onStartTrackingTouch(b: SeekBar?) {}
                     override fun onStopTrackingTouch(b: SeekBar?) {}
                 })
@@ -339,10 +340,10 @@ class Ps2GameActivity : Activity(), SurfaceHolder.Callback {
                 })
                 box.addView(sizeLabel); box.addView(sizeBar); box.addView(opacityLabel); box.addView(opacityBar)
                 AlertDialog.Builder(this@Ps2GameActivity).setTitle("Controller UI").setView(box)
-                    .setNeutralButton("RESET") { _, _ -> saveControllerUi(.72f, .62f); Toast.makeText(this@Ps2GameActivity, "Reset. Buka ulang game.", Toast.LENGTH_SHORT).show() }
+                    .setNeutralButton("RESET") { _, _ -> saveControllerUi(.58f, .62f); Toast.makeText(this@Ps2GameActivity, "Reset. Buka ulang game.", Toast.LENGTH_SHORT).show() }
                     .setNegativeButton("BATAL", null)
                     .setPositiveButton("SIMPAN") { _, _ ->
-                        saveControllerUi((sizeBar.progress + 50) / 100f, (opacityBar.progress + 20) / 100f)
+                        saveControllerUi((sizeBar.progress + 45) / 100f, (opacityBar.progress + 20) / 100f)
                         Toast.makeText(this@Ps2GameActivity, "Tersimpan. Buka ulang game untuk menerapkan.", Toast.LENGTH_SHORT).show()
                     }.show()
             }
